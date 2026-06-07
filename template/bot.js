@@ -80,6 +80,7 @@ const state = {
   status: "starting",
   qr: null,
   meJid: null,
+  meLid: null,
   meName: null,
   stats: { messagesIn: 0, messagesOut: 0, errors: 0 },
   lastError: null,
@@ -198,9 +199,12 @@ async function startBot() {
       state.status = "connected";
       state.qr = null;
       state.meJid = sock.user?.id;
+      state.meLid = sock.user?.lid || null;
       state.meName = sock.user?.name || sock.user?.verifiedName || "";
       ensureSelfWhitelisted();
-      console.log(`[wa] connected as ${state.meJid}`);
+      console.log(
+        `[wa] connected as ${state.meJid} (lid: ${state.meLid || "none"})`,
+      );
     } else if (connection === "close") {
       const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
@@ -217,8 +221,15 @@ async function startBot() {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    console.log(`[upsert] type=${type} count=${messages.length}`);
     for (const msg of messages) {
+      const k = msg.key || {};
+      const hasMsg = !!msg.message;
+      const msgKeys = msg.message ? Object.keys(msg.message).slice(0, 3) : [];
+      console.log(
+        `[upsert/m] fromMe=${k.fromMe} jid=${k.remoteJid} hasMsg=${hasMsg} keys=${msgKeys.join(",")}`,
+      );
+      if (type !== "notify" && type !== "append") continue;
       try {
         await handleMessage(msg);
       } catch (e) {
@@ -238,12 +249,17 @@ async function handleMessage(msg) {
   if (remoteJid === "status@broadcast") return;
 
   const fromMe = !!msg.key.fromMe;
-  const meJid = state.meJid;
-  const meUser = jidUser(meJid);
+  const meUser = jidUser(state.meJid);
+  const meLidUser = state.meLid ? jidUser(state.meLid) : null;
   const remoteUser = jidUser(remoteJid);
 
-  // self-chat: המשתמש שולח לעצמו, הבוט אמור לענות
-  const isSelfChat = fromMe && remoteUser === meUser;
+  // self-chat: ב-WhatsApp החדש זה יכול להגיע ב-2 פורמטים:
+  //   1. <phone>@s.whatsapp.net  (פורמט ישן)
+  //   2. <LID>@lid               (פורמט חדש)
+  // אנחנו תופסים את שניהם
+  const isSelfChat =
+    fromMe &&
+    (remoteUser === meUser || (meLidUser && remoteUser === meLidUser));
 
   // הודעת תשובה של הבוט עצמו (לא self-chat, לא לעבד)
   if (fromMe && !isSelfChat) return;
