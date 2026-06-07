@@ -346,6 +346,60 @@
         opacity: 1;
       }
 
+      .mode-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .mode-card {
+        background: var(--cream);
+        border: 2px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 12px;
+        cursor: pointer;
+        text-align: right;
+        transition: all 0.15s;
+      }
+      .mode-card:hover {
+        border-color: var(--gold);
+      }
+      .mode-card.active {
+        background: #fffbf1;
+        border-color: var(--gold-deep);
+        box-shadow: 0 0 0 3px rgba(234, 197, 110, 0.25);
+      }
+      .mode-card .emoji {
+        font-size: 24px;
+        margin-bottom: 4px;
+      }
+      .mode-card .title {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 2px;
+      }
+      .mode-card .desc {
+        font-size: 12px;
+        color: var(--smoke);
+        line-height: 1.4;
+      }
+
+      .check-result {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin-right: 8px;
+      }
+      .check-result.ok {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .check-result.fail {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
       .feed {
         background: white;
         border: 1px solid var(--line);
@@ -430,7 +484,56 @@
       </div>
 
       <details class="settings">
-        <summary>⚙️ הגדרות הבוט</summary>
+        <summary>🎭 מה הבוט יודע לעשות (מצב)</summary>
+        <div class="body">
+          <label>בחר את רמת ההרשאות של הבוט שלך</label>
+          <div class="mode-grid">
+            <div class="mode-card" data-mode="personal">
+              <div class="emoji">🧑‍💻</div>
+              <div class="title">עוזר אישי מלא</div>
+              <div class="desc">
+                יוצר, עורך ומריץ בלי לשאול. לשימוש פרטי בלבד.
+              </div>
+            </div>
+            <div class="mode-card" data-mode="careful">
+              <div class="emoji">🛡️</div>
+              <div class="title">עוזר זהיר</div>
+              <div class="desc">שואל לפני שהוא משנה קבצים. מאוזן.</div>
+            </div>
+            <div class="mode-card" data-mode="chat">
+              <div class="emoji">💬</div>
+              <div class="title">צ'אט בלבד</div>
+              <div class="desc">לא נוגע בקבצים. שיחות וייעוץ בלבד.</div>
+            </div>
+          </div>
+          <input type="hidden" id="mode" value="personal" />
+        </div>
+      </details>
+
+      <details class="settings">
+        <summary>💛 הודעת ברכה ראשונה</summary>
+        <div class="body">
+          <label>הבוט שולח את ההודעה הזו כשהוא נדלק לראשונה</label>
+          <textarea
+            id="welcomeMessage"
+            placeholder="היי 💛 אני הבוט האישי שלך..."
+            style="min-height: 100px"
+          ></textarea>
+          <div style="margin-top: 12px">
+            <button class="btn btn-ghost" id="resend-welcome-btn">
+              📤 שלח שוב לוואטסאפ
+            </button>
+            <span
+              class="check-result"
+              id="welcome-status"
+              style="display: none"
+            ></span>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings">
+        <summary>⚙️ הגדרות מתקדמות</summary>
         <div class="body">
           <label>שם הבוט (איך הוא חותם)</label>
           <input id="agentName" placeholder="הבוט שלי" />
@@ -442,47 +545,40 @@
           <textarea
             id="systemPromptAppend"
             placeholder="אתה עוזר אישי לבעל עסק..."
+            style="min-height: 110px"
           ></textarea>
 
-          <div class="row">
-            <div>
-              <label>מודל</label>
-              <select id="model">
-                <option value="sonnet">Sonnet (מהיר וחכם)</option>
-                <option value="opus">Opus (החכם ביותר)</option>
-                <option value="haiku">Haiku (הכי מהיר)</option>
-              </select>
-            </div>
-            <div>
-              <label>מצב הרשאות</label>
-              <select id="permissionMode">
-                <option value="bypassPermissions">עוזר אישי (חופשי)</option>
-                <option value="acceptEdits">אישור עריכות בלבד</option>
-                <option value="plan">קריאה בלבד</option>
-              </select>
-            </div>
-          </div>
+          <label>מודל Claude</label>
+          <select id="model">
+            <option value="sonnet">Sonnet (מהיר וחכם — מומלץ)</option>
+            <option value="opus">Opus (החכם ביותר, איטי יותר)</option>
+            <option value="haiku">Haiku (הכי מהיר, פחות חכם)</option>
+          </select>
 
-          <div
-            style="
-              margin-top: 20px;
-              display: flex;
-              gap: 8px;
-              align-items: center;
-            "
-          >
-            <button class="btn btn-primary" id="save-btn">שמירת הגדרות</button>
-            <span class="saved-flash" id="saved-flash">נשמר ✓</span>
-            <button
-              class="btn btn-danger"
-              id="reset-btn"
-              style="margin-right: auto"
-            >
-              🔄 התחבר מחדש
+          <div style="margin-top: 16px">
+            <button class="btn btn-ghost" id="check-claude-btn">
+              🧪 בדוק חיבור ל-Claude
             </button>
+            <span
+              class="check-result"
+              id="claude-check-result"
+              style="display: none"
+            ></span>
           </div>
         </div>
       </details>
+
+      <div style="margin: 16px 0; display: flex; gap: 8px; align-items: center">
+        <button class="btn btn-primary" id="save-btn">💾 שמירת הגדרות</button>
+        <span class="saved-flash" id="saved-flash">נשמר ✓</span>
+        <button
+          class="btn btn-danger"
+          id="reset-btn"
+          style="margin-right: auto"
+        >
+          🔄 התחבר מחדש
+        </button>
+      </div>
 
       <div class="feed" id="feed-card" style="display: none">
         <h3>📨 הודעות אחרונות</h3>
@@ -588,6 +684,17 @@
 
       let lastConfigLoaded = false;
 
+      function setMode(mode) {
+        document.getElementById("mode").value = mode;
+        document.querySelectorAll(".mode-card").forEach((card) => {
+          card.classList.toggle("active", card.dataset.mode === mode);
+        });
+      }
+
+      document.querySelectorAll(".mode-card").forEach((card) => {
+        card.addEventListener("click", () => setMode(card.dataset.mode));
+      });
+
       function loadConfigIntoForm(cfg) {
         if (lastConfigLoaded) return;
         lastConfigLoaded = true;
@@ -595,8 +702,10 @@
         document.getElementById("workdir").value = cfg.workdir || "";
         document.getElementById("systemPromptAppend").value =
           cfg.systemPromptAppend || "";
+        document.getElementById("welcomeMessage").value =
+          cfg.welcomeMessage || "";
         document.getElementById("model").value = cfg.model || "sonnet";
-        document.getElementById("permissionMode").value = "bypassPermissions";
+        setMode(cfg.mode || "personal");
         if (cfg.agentName) {
           document.getElementById("agent-title").textContent =
             cfg.agentName + " ✨";
@@ -642,8 +751,9 @@
             workdir: document.getElementById("workdir").value,
             systemPromptAppend:
               document.getElementById("systemPromptAppend").value,
+            welcomeMessage: document.getElementById("welcomeMessage").value,
             model: document.getElementById("model").value,
-            permissionMode: document.getElementById("permissionMode").value,
+            mode: document.getElementById("mode").value,
           };
           const r = await fetch("/config", {
             method: "POST",
@@ -669,6 +779,59 @@
             return;
           await fetch("/reset", { method: "POST" });
           setTimeout(() => location.reload(), 2000);
+        });
+
+      document
+        .getElementById("check-claude-btn")
+        .addEventListener("click", async () => {
+          const result = document.getElementById("claude-check-result");
+          result.style.display = "inline-block";
+          result.className = "check-result";
+          result.textContent = "בודק...";
+          try {
+            const r = await fetch("/check-claude");
+            const j = await r.json();
+            if (j.ok) {
+              result.className = "check-result ok";
+              result.textContent = `✅ Claude מותקן (${j.version || "OK"})`;
+            } else {
+              result.className = "check-result fail";
+              result.textContent = `❌ לא מותקן — ${j.error || "claude לא נמצא ב-PATH"}`;
+            }
+          } catch (e) {
+            result.className = "check-result fail";
+            result.textContent = "❌ שגיאה: " + e.message;
+          }
+        });
+
+      document
+        .getElementById("resend-welcome-btn")
+        .addEventListener("click", async () => {
+          const status = document.getElementById("welcome-status");
+          status.style.display = "inline-block";
+          status.className = "check-result";
+          status.textContent = "שולח...";
+          // save welcome message first
+          await fetch("/config", {
+            method: "POST",
+            body: JSON.stringify({
+              welcomeMessage: document.getElementById("welcomeMessage").value,
+            }),
+          });
+          try {
+            const r = await fetch("/resend-welcome", { method: "POST" });
+            const j = await r.json();
+            if (j.ok) {
+              status.className = "check-result ok";
+              status.textContent = "✅ נשלח לוואטסאפ";
+            } else {
+              status.className = "check-result fail";
+              status.textContent = "❌ " + (j.error || "שגיאה");
+            }
+          } catch (e) {
+            status.className = "check-result fail";
+            status.textContent = "❌ " + e.message;
+          }
         });
 
       tick();

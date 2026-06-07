@@ -1,0 +1,8 @@
+{
+  "agentName": "הבוט שלי",
+  "workdir": "",
+  "model": "sonnet",
+  "whitelist": [],
+  "systemPromptAppend": "אתה עוזר אישי לבעל עסק. ענה קצר, בעברית, ישיר. ללא תסכמי-מה-עשיתי.",
+  "permissionMode": "bypassPermissions"
+}

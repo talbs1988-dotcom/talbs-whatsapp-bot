@@ -30,19 +30,37 @@ const FEED_PATH = path.join(__dirname, "feed.json");
 const AUTH_DIR = path.join(__dirname, "auth");
 const PORT = 7655;
 
+// 3 modes that map to Claude CLI permission modes
+const MODE_PERMISSIONS = {
+  personal: "bypassPermissions", // עוזר אישי - יוצר ועורך בלי לשאול
+  careful: "acceptEdits", // עוזר זהיר - שואל לפני קבצים
+  chat: "plan", // צ'אט בלבד - לא נוגע
+};
+
+const DEFAULT_SYSTEM_PROMPT =
+  "אתה הבוט האישי של המשתמש דרך WhatsApp. הוא בעל עסק שמשתמש בך לעזרה ביומיום. ענה קצר, ישיר, ובעברית. אל תפתח כל תשובה ב'איך אפשר לעזור' - פשוט תענה. אם השאלה לא ברורה, תשאל שאלה ספציפית אחת. השתמש בכלים שלך (קבצים, פקודות, וכו') אם זה עוזר לענות.";
+
+function defaultConfig() {
+  return {
+    agentName: "הבוט שלי",
+    workdir: process.env.HOME,
+    model: "sonnet",
+    mode: "personal",
+    whitelist: [],
+    systemPromptAppend: DEFAULT_SYSTEM_PROMPT,
+    welcomeMessage:
+      "היי 💛 אני הבוט האישי שלך מהסדנה של טל בשור. אני יכול לעזור לך לנהל לידים, לקבוע פגישות, לכתוב הודעות, לחפש בקבצים שלך, ועוד הרבה. נסה לכתוב לי 'מה אתה יודע לעשות?' ואני אסביר.",
+    welcomeSent: false,
+  };
+}
+
 function loadConfig() {
+  let saved = {};
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-  } catch {
-    return {
-      agentName: "הבוט שלי",
-      workdir: process.env.HOME,
-      model: "sonnet",
-      whitelist: [],
-      systemPromptAppend: "",
-      permissionMode: "bypassPermissions",
-    };
-  }
+    saved = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch {}
+  // merge with defaults so missing fields get filled
+  return { ...defaultConfig(), ...saved };
 }
 
 function saveConfig(cfg) {
@@ -106,13 +124,18 @@ function ensureSelfWhitelisted() {
 function askClaude(userJid, text) {
   return new Promise((resolve) => {
     const sessionId = sessions[userJid];
+    // mode (personal/careful/chat) → CLI permission-mode
+    const permissionMode =
+      MODE_PERMISSIONS[config.mode] ||
+      config.permissionMode ||
+      "bypassPermissions";
     const args = [
       "-p",
       text,
       "--model",
       config.model || "sonnet",
       "--permission-mode",
-      config.permissionMode || "bypassPermissions",
+      permissionMode,
       "--output-format",
       "json",
     ];
@@ -205,6 +228,26 @@ async function startBot() {
       console.log(
         `[wa] connected as ${state.meJid} (lid: ${state.meLid || "none"})`,
       );
+      // הודעת ברכה אוטומטית בחיבור הראשון
+      if (!config.welcomeSent && config.welcomeMessage) {
+        setTimeout(async () => {
+          try {
+            const targetJid = state.meLid || state.meJid;
+            await sock.sendMessage(targetJid, { text: config.welcomeMessage });
+            config.welcomeSent = true;
+            saveConfig(config);
+            state.stats.messagesOut++;
+            pushFeed({
+              dir: "out",
+              to: jidUser(targetJid),
+              text: config.welcomeMessage,
+            });
+            console.log(`[welcome] sent to ${targetJid}`);
+          } catch (e) {
+            console.error("[welcome] failed:", e.message);
+          }
+        }, 3000);
+      }
     } else if (connection === "close") {
       const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
@@ -325,13 +368,77 @@ const server = http.createServer(async (req, res) => {
         agentName: config.agentName,
         workdir: config.workdir,
         model: config.model,
+        mode: config.mode,
         whitelist: config.whitelist,
         systemPromptAppend: config.systemPromptAppend,
+        welcomeMessage: config.welcomeMessage,
+        welcomeSent: config.welcomeSent,
       },
       feed: feed.slice(0, 20),
     };
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(safe));
+    return;
+  }
+
+  // GET /check-claude — בדיקה אם CLI מותקן ומחובר
+  if (req.method === "GET" && url.pathname === "/check-claude") {
+    const claudeBin = process.env.CLAUDE_BIN || "claude";
+    const child = spawn(claudeBin, ["--version"], { env: { ...process.env } });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.stderr.on("data", (d) => (err += d.toString()));
+    child.on("error", (e) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          installed: false,
+          error: e.message || "claude not found in PATH",
+        }),
+      );
+    });
+    child.on("close", (code) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: code === 0,
+          installed: code === 0,
+          version: out.trim() || null,
+          error: code !== 0 ? err.trim() : null,
+        }),
+      );
+    });
+    return;
+  }
+
+  // POST /resend-welcome — שלח שוב את הודעת הברכה
+  if (req.method === "POST" && url.pathname === "/resend-welcome") {
+    if (state.status !== "connected" || !state.meJid) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "not connected" }));
+      return;
+    }
+    const targetJid = state.meLid || state.meJid;
+    sock
+      .sendMessage(targetJid, { text: config.welcomeMessage })
+      .then(() => {
+        config.welcomeSent = true;
+        saveConfig(config);
+        state.stats.messagesOut++;
+        pushFeed({
+          dir: "out",
+          to: jidUser(targetJid),
+          text: config.welcomeMessage,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch((e) => {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      });
     return;
   }
 
