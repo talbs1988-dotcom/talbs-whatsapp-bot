@@ -52,12 +52,13 @@ const DEFAULT_SYSTEM_PROMPT = `אתה הבוט האישי של בעל עסק ש�
 
 const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני הבוט שלך מהסדנה של טל בשור.
 
-אני יכול לכתוב לך הודעות ומיילים, לעקוב אחרי לידים, לסדר פגישות, לחפש בקבצים שלך, ולעזור לך לחשוב כשתקועים.
+לפני שמתחילים — *לפנות אליך בלשון זכר או נקבה?*
+תענה/י לי במילה אחת: *זכר* או *נקבה*
 
-*תנסה משהו אמיתי מהיום שלך* — לא "היי":
+אחר כך תוכל/י לבקש ממני דברים אמיתיים מהיום שלך, למשל:
 • "תכתוב הודעת מעקב ללקוח שלא חזר אליי"
 • "סכם לי את הפגישה האחרונה"
-• "אני תקועה עם המחיר ללקוח, איך לנסח?"
+• "אני תקוע/ה עם המחיר ללקוח, איך לנסח?"
 
 אני פה.`;
 
@@ -67,6 +68,7 @@ function defaultConfig() {
     workdir: process.env.HOME,
     model: "sonnet",
     mode: "personal",
+    gender: "", // "male" | "female" | "" - מתעדכן אוטומטית מתשובת המשתמש
     whitelist: [],
     systemPromptAppend: DEFAULT_SYSTEM_PROMPT,
     welcomeMessage: DEFAULT_WELCOME_MESSAGE,
@@ -124,6 +126,46 @@ const state = {
   lastError: null,
 };
 
+// IDs של הודעות שאני בעצמי שלחתי — כדי לזהות echo ולא ליפול ללופ
+const myMessageIds = new Set();
+function rememberSentId(id) {
+  if (!id) return;
+  myMessageIds.add(id);
+  if (myMessageIds.size > 200) {
+    const arr = Array.from(myMessageIds);
+    myMessageIds.clear();
+    arr.slice(-100).forEach((x) => myMessageIds.add(x));
+  }
+}
+
+// IDs של הודעות נכנסות שכבר טיפלתי בהן — כדי לא לטפל פעמיים (Baileys שולח notify+append)
+const handledIncomingIds = new Set();
+function isAlreadyHandled(id) {
+  if (!id) return false;
+  if (handledIncomingIds.has(id)) return true;
+  handledIncomingIds.add(id);
+  if (handledIncomingIds.size > 500) {
+    const arr = Array.from(handledIncomingIds);
+    handledIncomingIds.clear();
+    arr.slice(-250).forEach((x) => handledIncomingIds.add(x));
+  }
+  return false;
+}
+
+// פונקציה אחת לכל שליחת הודעה - שמרשמת את ה-id כדי שלא נטפל בה כשנקבל אותה כ-echo
+async function sendBotMessage(jid, text) {
+  try {
+    const sent = await sock.sendMessage(jid, { text });
+    rememberSentId(sent?.key?.id);
+    return sent;
+  } catch (e) {
+    console.error("[send] failed:", e.message);
+    state.stats.errors++;
+    state.lastError = e.message;
+    return null;
+  }
+}
+
 // ----- Helpers -----
 function jidUser(jid) {
   if (!jid) return "";
@@ -162,8 +204,15 @@ function askClaude(userJid, text) {
     if (sessionId) {
       args.push("--resume", sessionId);
     }
-    if (config.systemPromptAppend) {
-      args.push("--append-system-prompt", config.systemPromptAppend);
+    // הזרקת system prompt + העדפת לשון פנייה
+    let systemPrompt = config.systemPromptAppend || "";
+    if (config.gender === "male") {
+      systemPrompt += "\n\nחשוב: התייחס למשתמש בלשון זכר תמיד.";
+    } else if (config.gender === "female") {
+      systemPrompt += "\n\nחשוב: התייחסי למשתמשת בלשון נקבה תמיד.";
+    }
+    if (systemPrompt) {
+      args.push("--append-system-prompt", systemPrompt);
     }
 
     const claudeBin = process.env.CLAUDE_BIN || "claude";
@@ -251,9 +300,9 @@ async function startBot() {
       // הודעת ברכה אוטומטית בחיבור הראשון
       if (!config.welcomeSent && config.welcomeMessage) {
         setTimeout(async () => {
-          try {
-            const targetJid = state.meLid || state.meJid;
-            await sock.sendMessage(targetJid, { text: config.welcomeMessage });
+          const targetJid = state.meLid || state.meJid;
+          const sent = await sendBotMessage(targetJid, config.welcomeMessage);
+          if (sent) {
             config.welcomeSent = true;
             saveConfig(config);
             state.stats.messagesOut++;
@@ -263,8 +312,6 @@ async function startBot() {
               text: config.welcomeMessage,
             });
             console.log(`[welcome] sent to ${targetJid}`);
-          } catch (e) {
-            console.error("[welcome] failed:", e.message);
           }
         }, 3000);
       }
@@ -304,9 +351,22 @@ async function startBot() {
   });
 }
 
-// ----- Message handling — קריטי: self-chat fix -----
+// ----- Message handling — קריטי: self-chat fix + echo loop fix -----
 async function handleMessage(msg) {
   if (!msg.message) return;
+
+  // קריטי 1: זיהוי echo — אם זו הודעה שאני עצמי שלחתי, להתעלם
+  if (msg.key?.id && myMessageIds.has(msg.key.id)) {
+    console.log(`[skip/echo] own message: ${msg.key.id}`);
+    return;
+  }
+
+  // קריטי 2: זיהוי כפילות — Baileys שולח לפעמים אותה הודעה כ-notify וגם כ-append
+  if (isAlreadyHandled(msg.key?.id)) {
+    console.log(`[skip/dup] already handled: ${msg.key.id}`);
+    return;
+  }
+
   const remoteJid = msg.key.remoteJid;
   if (!remoteJid || remoteJid.endsWith("@g.us")) return; // לא קבוצות בגרסה הזו
   if (remoteJid === "status@broadcast") return;
@@ -350,6 +410,43 @@ async function handleMessage(msg) {
     `[in${isSelfChat ? "/self" : ""}] ${remoteUser}: ${text.slice(0, 80)}`,
   );
 
+  // זיהוי לשון פנייה — אם זו ההודעה הראשונה אחרי הברכה, ולא ניתן עדיין
+  if (!config.gender) {
+    const trimmed = text.trim();
+    if (/^זכר\b/.test(trimmed) || trimmed === "זכר") {
+      config.gender = "male";
+      saveConfig(config);
+      console.log("[gender] set to male");
+      await sendBotMessage(
+        remoteJid,
+        "מעולה, אתפנה אליך בלשון זכר 👍 עכשיו תכתוב לי משהו אמיתי שאתה צריך עזרה איתו.",
+      );
+      state.stats.messagesOut++;
+      pushFeed({
+        dir: "out",
+        to: remoteUser,
+        text: "מעולה, אתפנה אליך בלשון זכר. עכשיו תכתוב לי משהו אמיתי...",
+      });
+      return;
+    }
+    if (/^נקבה\b/.test(trimmed) || trimmed === "נקבה") {
+      config.gender = "female";
+      saveConfig(config);
+      console.log("[gender] set to female");
+      await sendBotMessage(
+        remoteJid,
+        "מעולה, אתפנה אלייך בלשון נקבה 👍 עכשיו תכתבי לי משהו אמיתי שאת צריכה עזרה איתו.",
+      );
+      state.stats.messagesOut++;
+      pushFeed({
+        dir: "out",
+        to: remoteUser,
+        text: "מעולה, אתפנה אלייך בלשון נקבה. עכשיו תכתבי לי משהו אמיתי...",
+      });
+      return;
+    }
+  }
+
   // typing indicator
   try {
     await sock.sendPresenceUpdate("composing", remoteJid);
@@ -362,7 +459,7 @@ async function handleMessage(msg) {
   } catch {}
 
   if (reply.text) {
-    await sock.sendMessage(remoteJid, { text: reply.text });
+    await sendBotMessage(remoteJid, reply.text);
     state.stats.messagesOut++;
     pushFeed({ dir: "out", to: remoteUser, text: reply.text });
   }
