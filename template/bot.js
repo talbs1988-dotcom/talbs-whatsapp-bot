@@ -465,12 +465,42 @@ async function handleMessage(msg) {
     }
   }
 
+  // זיהוי "intro mode" — פתיחת שיחה ("היי" / "שלום" / "מה אתה יודע")
+  // → אפס session id (שלא ימשיך מסשן ישן) + שלח prompt מורחב להצגה עצמית
+  const trimmedText = text.trim();
+  const isIntroQuery =
+    /^(היי|הי|שלום|מה אתה יודע|מה אתה יכול|hi|hello|hey)\b/i.test(
+      trimmedText,
+    ) || trimmedText.length < 6;
+
+  let textToSend = text;
+  if (isIntroQuery) {
+    console.log("[intro] reset session + expanded prompt");
+    delete sessions[remoteJid];
+    saveSessions();
+    textToSend = `המשתמש אמר: "${text}"
+
+זו תחילת השיחה איתו. הצג את עצמך בהודעת WhatsApp קצרה ומסודרת:
+
+1. שורת פתיחה: "היי 👋 אני ${config.agentName || "הבוט שלך"}"
+2. שורה אחת מה אתה — "אני Claude Code שלך, מחובר ל-WhatsApp"
+3. רשימת bullet קצרה (3-5) של מה אתה יודע לעשות. כלול אינטגרציות אמיתיות שיש לך (בדוק את הכלים ש-MCPs שזמינים לך — כמו Google Drive, Calendar, Airtable, Composio, ועוד)
+4. סגור עם הזמנה לבקש משהו ספציפי
+
+חוקים:
+- מקסימום 12 שורות
+- אמוג'ים רלוונטיים (לא מוגזם)
+- בעברית
+- לא לפתוח ב"איך אפשר לעזור"
+- לא לרשום כלים שאין לך באמת (תבדוק את ה-tools שלך לפני)`;
+  }
+
   // typing indicator
   try {
     await sock.sendPresenceUpdate("composing", remoteJid);
   } catch {}
 
-  const reply = await askClaude(remoteJid, text);
+  const reply = await askClaude(remoteJid, textToSend);
 
   try {
     await sock.sendPresenceUpdate("paused", remoteJid);
