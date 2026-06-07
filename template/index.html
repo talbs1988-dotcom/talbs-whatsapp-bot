@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>הבוט שלי · טל בשור</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --cream: #fbf9f6;
+        --ink: #1a1a1f;
+        --smoke: #6b7280;
+        --line: #e5e0d6;
+        --peach: #ffe4d1;
+        --gold: #eac56e;
+        --gold-deep: #9c6b28;
+        --green: #34d399;
+        --red: #f87171;
+        --shadow:
+          0 1px 3px rgba(26, 26, 31, 0.06), 0 1px 2px rgba(26, 26, 31, 0.04);
+        --shadow-lg:
+          0 10px 25px rgba(156, 107, 40, 0.1), 0 4px 10px rgba(26, 26, 31, 0.04);
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        font-family:
+          "Rubik",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--cream);
+        color: var(--ink);
+        min-height: 100vh;
+        line-height: 1.55;
+      }
+      .container {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header {
+        text-align: center;
+        margin-bottom: 32px;
+      }
+      .logo {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        letter-spacing: 0.5px;
+        color: var(--gold-deep);
+        font-weight: 500;
+        text-transform: uppercase;
+      }
+      .logo::before {
+        content: "💛";
+      }
+      h1 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-top: 6px;
+        background: linear-gradient(135deg, var(--gold-deep), var(--gold));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .subtitle {
+        color: var(--smoke);
+        margin-top: 4px;
+        font-size: 15px;
+      }
+
+      .card {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 28px;
+        box-shadow: var(--shadow);
+        margin-bottom: 16px;
+      }
+      .card.hero {
+        box-shadow: var(--shadow-lg);
+        padding: 36px;
+        text-align: center;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 500;
+        background: var(--peach);
+        color: var(--gold-deep);
+        margin-bottom: 16px;
+      }
+      .status-badge.connected {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .status-badge.error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .status-badge::before {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .qr-wrap {
+        display: inline-block;
+        padding: 16px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        margin: 16px 0;
+      }
+      .qr-wrap img {
+        display: block;
+        width: 280px;
+        height: 280px;
+      }
+      .qr-instructions {
+        text-align: right;
+        margin-top: 20px;
+        background: #fffbf1;
+        border: 1px solid var(--gold);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .qr-instructions h3 {
+        font-size: 15px;
+        margin-bottom: 8px;
+      }
+      .qr-instructions ol {
+        padding-right: 20px;
+        color: var(--smoke);
+        font-size: 14px;
+      }
+      .qr-instructions ol li {
+        margin: 4px 0;
+      }
+
+      .big-check {
+        font-size: 64px;
+        margin-bottom: 8px;
+      }
+      .me {
+        font-size: 14px;
+        color: var(--smoke);
+        margin-top: 4px;
+      }
+      .me strong {
+        color: var(--ink);
+      }
+
+      .send-test {
+        background: var(--peach);
+        border-radius: 14px;
+        padding: 18px 20px;
+        margin-top: 20px;
+        text-align: right;
+      }
+      .send-test h3 {
+        font-size: 15px;
+        margin-bottom: 6px;
+        color: var(--gold-deep);
+      }
+      .send-test p {
+        font-size: 14px;
+        color: var(--ink);
+      }
+      .send-test code {
+        background: white;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-family:
+          ui-monospace,
+          SF Mono,
+          monospace;
+        font-size: 13px;
+        border: 1px solid var(--line);
+      }
+
+      .stats {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 18px;
+        font-size: 13px;
+        color: var(--smoke);
+      }
+      .stat {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .stat strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      details.settings {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 0;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+      details.settings summary {
+        cursor: pointer;
+        padding: 18px 24px;
+        font-weight: 500;
+        font-size: 15px;
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      details.settings summary::-webkit-details-marker {
+        display: none;
+      }
+      details.settings summary::after {
+        content: "▼";
+        font-size: 11px;
+        color: var(--smoke);
+      }
+      details.settings[open] summary::after {
+        content: "▲";
+      }
+      details.settings .body {
+        padding: 0 24px 24px;
+        border-top: 1px solid var(--line);
+        padding-top: 20px;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--smoke);
+        margin: 14px 0 6px;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-family: inherit;
+        font-size: 14px;
+        background: var(--cream);
+        color: var(--ink);
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--gold);
+        background: white;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 70px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 18px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--gold-deep), var(--gold));
+        color: white;
+      }
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-lg);
+      }
+      .btn-ghost {
+        background: white;
+        border-color: var(--line);
+        color: var(--ink);
+      }
+      .btn-ghost:hover {
+        border-color: var(--gold);
+      }
+      .btn-danger {
+        background: white;
+        border-color: var(--red);
+        color: var(--red);
+      }
+
+      .saved-flash {
+        display: inline-block;
+        background: #d1fae5;
+        color: #065f46;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        margin-right: 8px;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .saved-flash.show {
+        opacity: 1;
+      }
+
+      .feed {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px 24px;
+      }
+      .feed h3 {
+        font-size: 15px;
+        margin-bottom: 12px;
+        color: var(--gold-deep);
+      }
+      .feed-empty {
+        color: var(--smoke);
+        font-size: 14px;
+        text-align: center;
+        padding: 12px 0;
+      }
+      .feed-item {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        display: flex;
+        gap: 8px;
+        align-items: start;
+      }
+      .feed-item:last-child {
+        border-bottom: none;
+      }
+      .feed-arrow {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+      .feed-text {
+        flex: 1;
+        color: var(--ink);
+      }
+      .feed-meta {
+        color: var(--smoke);
+        font-size: 11px;
+        margin-top: 2px;
+      }
+
+      footer {
+        text-align: center;
+        color: var(--smoke);
+        font-size: 12px;
+        margin-top: 32px;
+      }
+      footer span {
+        color: var(--gold-deep);
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 32px;
+        height: 32px;
+        border: 3px solid var(--line);
+        border-top-color: var(--gold);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="logo">טל בשור · הסדנה</div>
+        <h1 id="agent-title">הבוט שלי ✨</h1>
+        <div class="subtitle">בוט WhatsApp אישי, מחובר ל-Claude שלך</div>
+      </header>
+
+      <div class="card hero" id="hero">
+        <div class="status-badge" id="status-badge">בודק חיבור...</div>
+        <div id="hero-body">
+          <div class="spinner"></div>
+        </div>
+      </div>
+
+      <details class="settings">
+        <summary>⚙️ הגדרות הבוט</summary>
+        <div class="body">
+          <label>שם הבוט (איך הוא חותם)</label>
+          <input id="agentName" placeholder="הבוט שלי" />
+
+          <label>תיקיית עבודה (איפה הוא רואה קבצים)</label>
+          <input id="workdir" placeholder="/Users/you" />
+
+          <label>הוראות אישיות לבוט (system prompt)</label>
+          <textarea
+            id="systemPromptAppend"
+            placeholder="אתה עוזר אישי לבעל עסק..."
+          ></textarea>
+
+          <div class="row">
+            <div>
+              <label>מודל</label>
+              <select id="model">
+                <option value="sonnet">Sonnet (מהיר וחכם)</option>
+                <option value="opus">Opus (החכם ביותר)</option>
+                <option value="haiku">Haiku (הכי מהיר)</option>
+              </select>
+            </div>
+            <div>
+              <label>מצב הרשאות</label>
+              <select id="permissionMode">
+                <option value="bypassPermissions">עוזר אישי (חופשי)</option>
+                <option value="acceptEdits">אישור עריכות בלבד</option>
+                <option value="plan">קריאה בלבד</option>
+              </select>
+            </div>
+          </div>
+
+          <div
+            style="
+              margin-top: 20px;
+              display: flex;
+              gap: 8px;
+              align-items: center;
+            "
+          >
+            <button class="btn btn-primary" id="save-btn">שמירת הגדרות</button>
+            <span class="saved-flash" id="saved-flash">נשמר ✓</span>
+            <button
+              class="btn btn-danger"
+              id="reset-btn"
+              style="margin-right: auto"
+            >
+              🔄 התחבר מחדש
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <div class="feed" id="feed-card" style="display: none">
+        <h3>📨 הודעות אחרונות</h3>
+        <div id="feed-list"></div>
+      </div>
+
+      <footer><span>💛</span> נבנה במיוחד לסדנה של טל בשור · גרסה 1.0</footer>
+    </div>
+
+    <script>
+      async function fetchState() {
+        try {
+          const r = await fetch("/state");
+          return await r.json();
+        } catch {
+          return null;
+        }
+      }
+
+      function setStatusBadge(text, cls) {
+        const b = document.getElementById("status-badge");
+        b.textContent = text;
+        b.className = "status-badge " + (cls || "");
+      }
+
+      function renderQR(s) {
+        const body = document.getElementById("hero-body");
+        body.innerHTML = `
+        <div class="qr-wrap"><img src="${s.qr}" alt="QR Code" /></div>
+        <div class="qr-instructions">
+          <h3>📱 איך לחבר את הוואטסאפ שלך:</h3>
+          <ol>
+            <li>פתחו WhatsApp בטלפון</li>
+            <li>הגדרות ⚙️ ← מכשירים מקושרים</li>
+            <li>קישור מכשיר חדש</li>
+            <li>סרקו את הקוד הזה 👆</li>
+          </ol>
+        </div>`;
+      }
+
+      function renderConnected(s) {
+        const body = document.getElementById("hero-body");
+        const phone = (s.meJid || "").split("@")[0].split(":")[0];
+        body.innerHTML = `
+        <div class="big-check">🎉</div>
+        <h2 style="font-size:22px; font-weight:600;">הבוט שלך מחובר!</h2>
+        <div class="me">מחובר כ-<strong>${s.meName || "הוואטסאפ שלך"}</strong> · ${phone}</div>
+        <div class="send-test">
+          <h3>🚀 שלחו לעצמכם הודעה לבדיקה</h3>
+          <p>פתחו את הצ'אט שלכם עם עצמכם ב-WhatsApp ושלחו <code>היי</code>. הבוט יענה תוך ~3 שניות.</p>
+        </div>
+        <div class="stats">
+          <div class="stat">📥 <strong>${s.stats.messagesIn}</strong> נכנסו</div>
+          <div class="stat">📤 <strong>${s.stats.messagesOut}</strong> יצאו</div>
+          ${s.stats.errors ? `<div class="stat" style="color:var(--red);">⚠️ <strong>${s.stats.errors}</strong> שגיאות</div>` : ""}
+        </div>`;
+      }
+
+      function renderReconnecting(label) {
+        document.getElementById("hero-body").innerHTML = `
+        <div class="spinner"></div>
+        <p style="margin-top:12px; color:var(--smoke);">${label}</p>`;
+      }
+
+      function renderError(msg) {
+        document.getElementById("hero-body").innerHTML = `
+        <div class="big-check">😕</div>
+        <p style="color:var(--red); margin-bottom:8px;">${msg || "משהו נתקע"}</p>
+        <button class="btn btn-ghost" onclick="location.reload()">רענון</button>`;
+      }
+
+      function renderFeed(feed) {
+        const card = document.getElementById("feed-card");
+        const list = document.getElementById("feed-list");
+        if (!feed || feed.length === 0) {
+          card.style.display = "none";
+          return;
+        }
+        card.style.display = "block";
+        list.innerHTML = feed
+          .slice(0, 8)
+          .map((f) => {
+            const arrow = f.dir === "in" ? "📥" : "📤";
+            const who =
+              f.dir === "in"
+                ? `מ-${f.from}${f.selfChat ? " (אתה לעצמך)" : ""}`
+                : `אל-${f.to}`;
+            const tm = new Date(f.ts).toLocaleTimeString("he-IL", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const txt = (f.text || "").slice(0, 140);
+            return `<div class="feed-item">
+          <div class="feed-arrow">${arrow}</div>
+          <div>
+            <div class="feed-text">${txt.replace(/</g, "&lt;")}</div>
+            <div class="feed-meta">${who} · ${tm}</div>
+          </div>
+        </div>`;
+          })
+          .join("");
+      }
+
+      let lastConfigLoaded = false;
+
+      function loadConfigIntoForm(cfg) {
+        if (lastConfigLoaded) return;
+        lastConfigLoaded = true;
+        document.getElementById("agentName").value = cfg.agentName || "";
+        document.getElementById("workdir").value = cfg.workdir || "";
+        document.getElementById("systemPromptAppend").value =
+          cfg.systemPromptAppend || "";
+        document.getElementById("model").value = cfg.model || "sonnet";
+        document.getElementById("permissionMode").value = "bypassPermissions";
+        if (cfg.agentName) {
+          document.getElementById("agent-title").textContent =
+            cfg.agentName + " ✨";
+          document.title = cfg.agentName + " · טל בשור";
+        }
+      }
+
+      async function tick() {
+        const s = await fetchState();
+        if (!s) {
+          setStatusBadge("אין חיבור לשרת", "error");
+          renderError("השרת לא מגיב — וודאו שה-Terminal עם הבוט עוד פתוח.");
+          return;
+        }
+        loadConfigIntoForm(s.config);
+        renderFeed(s.feed);
+
+        if (s.status === "qr") {
+          setStatusBadge("ממתין לסריקת QR", "");
+          renderQR(s);
+        } else if (s.status === "connected") {
+          setStatusBadge("מחובר", "connected");
+          renderConnected(s);
+        } else if (s.status === "reconnecting") {
+          setStatusBadge("מתחבר מחדש...", "");
+          renderReconnecting("מתחבר מחדש...");
+        } else if (s.status === "logged-out") {
+          setStatusBadge("הוצאת חיבור", "error");
+          renderReconnecting("הוצאת חיבור — מכין QR חדש...");
+        } else if (s.status === "error") {
+          setStatusBadge("שגיאה", "error");
+          renderError(s.lastError);
+        } else {
+          setStatusBadge("מתחיל...", "");
+        }
+      }
+
+      document
+        .getElementById("save-btn")
+        .addEventListener("click", async () => {
+          const next = {
+            agentName: document.getElementById("agentName").value,
+            workdir: document.getElementById("workdir").value,
+            systemPromptAppend:
+              document.getElementById("systemPromptAppend").value,
+            model: document.getElementById("model").value,
+            permissionMode: document.getElementById("permissionMode").value,
+          };
+          const r = await fetch("/config", {
+            method: "POST",
+            body: JSON.stringify(next),
+          });
+          if (r.ok) {
+            const flash = document.getElementById("saved-flash");
+            flash.classList.add("show");
+            setTimeout(() => flash.classList.remove("show"), 1500);
+            if (next.agentName) {
+              document.getElementById("agent-title").textContent =
+                next.agentName + " ✨";
+            }
+          }
+        });
+
+      document
+        .getElementById("reset-btn")
+        .addEventListener("click", async () => {
+          if (
+            !confirm("זה ינתק את הוואטסאפ ויחזיר אותך לסריקת QR מחדש. להמשיך?")
+          )
+            return;
+          await fetch("/reset", { method: "POST" });
+          setTimeout(() => location.reload(), 2000);
+        });
+
+      tick();
+      setInterval(tick, 2000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "talbs-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp bot for Tal Bsore's workshop participants — self-chat works out of the box",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.21",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  }
+}
