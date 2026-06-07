@@ -68,6 +68,7 @@ function defaultConfig() {
     workdir: process.env.HOME,
     model: "sonnet",
     mode: "personal",
+    provider: "baileys", // TODO: support "green-api" in future
     gender: "", // "male" | "female" | "" - מתעדכן אוטומטית מתשובת המשתמש
     whitelist: [],
     systemPromptAppend: DEFAULT_SYSTEM_PROMPT,
@@ -486,6 +487,7 @@ const server = http.createServer(async (req, res) => {
         workdir: config.workdir,
         model: config.model,
         mode: config.mode,
+        provider: config.provider || "baileys",
         whitelist: config.whitelist,
         systemPromptAppend: config.systemPromptAppend,
         welcomeMessage: config.welcomeMessage,

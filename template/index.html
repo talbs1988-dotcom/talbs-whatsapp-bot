@@ -550,10 +550,36 @@
 
           <label>מודל Claude</label>
           <select id="model">
-            <option value="sonnet">Sonnet (מהיר וחכם — מומלץ)</option>
-            <option value="opus">Opus (החכם ביותר, איטי יותר)</option>
-            <option value="haiku">Haiku (הכי מהיר, פחות חכם)</option>
+            <option value="sonnet">
+              Sonnet 4.6 — מאוזן · חכם מאוד + מהיר (מומלץ לרוב המשימות)
+            </option>
+            <option value="opus">
+              Opus 4.8 — הכי חכם, אבל איטי ויקר (למשימות מורכבות)
+            </option>
+            <option value="haiku">
+              Haiku 4.5 — הכי מהיר וזול, פחות חכם (לתשובות קצרות)
+            </option>
           </select>
+
+          <label style="margin-top: 18px">חיבור לוואטסאפ</label>
+          <select id="provider" disabled>
+            <option value="baileys" selected>
+              Baileys (פעיל) — חינם, סריקת QR
+            </option>
+            <option value="green-api" disabled>
+              Green API (בקרוב) — יציב יותר, $12/חודש
+            </option>
+          </select>
+          <small
+            style="
+              color: var(--smoke);
+              font-size: 12px;
+              display: block;
+              margin-top: 4px;
+            "
+          >
+            כרגע פעיל Baileys. תמיכה ב-Green API תיווסף בעדכון הבא.
+          </small>
 
           <div style="margin-top: 16px">
             <button class="btn btn-ghost" id="check-claude-btn">
