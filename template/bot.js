@@ -30,6 +30,11 @@ const FEED_PATH = path.join(__dirname, "feed.json");
 const AUTH_DIR = path.join(__dirname, "auth");
 const PORT = 7655;
 
+// וודא שתיקיית auth קיימת — Baileys צריך אותה לפני הראשון
+if (!fs.existsSync(AUTH_DIR)) {
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
 // 3 modes that map to Claude CLI permission modes
 const MODE_PERMISSIONS = {
   personal: "bypassPermissions", // עוזר אישי - יוצר ועורך בלי לשאול
@@ -650,13 +655,24 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[ui] http://127.0.0.1:${PORT}`);
-  // פתח דפדפן ברקע (Mac)
+  // פתח דפדפן ברקע — Chrome אם קיים, אחרת ברירת מחדל
+  const url = `http://127.0.0.1:${PORT}`;
   try {
-    spawn("open", [`http://127.0.0.1:${PORT}`], {
+    const tryChrome = spawn("open", ["-a", "Google Chrome", url], {
       detached: true,
       stdio: "ignore",
     });
-  } catch {}
+    tryChrome.on("exit", (code) => {
+      if (code !== 0) {
+        // אין Chrome - fallback לברירת מחדל
+        spawn("open", [url], { detached: true, stdio: "ignore" });
+      }
+    });
+  } catch {
+    try {
+      spawn("open", [url], { detached: true, stdio: "ignore" });
+    } catch {}
+  }
 });
 
 // ----- Boot -----
