@@ -89,6 +89,10 @@ function defaultConfig() {
     mode: "personal",
     provider: "baileys", // TODO: support "green-api" in future
     gender: "", // "male" | "female" | "" - מתעדכן אוטומטית מתשובת המשתמש
+    // אבטחה: כשדגל זה דלוק, רק self-chat (המספר שסרק את ה-QR) יכול להשתמש בבוט.
+    // הודעות ממספרים אחרים נדחות לחלוטין — גם אם הם ב-whitelist.
+    // ניתן לכבות ידנית רק על ידי עריכת config.json. ה-API הפנימי לא יכבה אותו.
+    lockdownMode: true,
     whitelist: [],
     systemPromptAppend: DEFAULT_SYSTEM_PROMPT,
     welcomeMessage: DEFAULT_WELCOME_MESSAGE,
@@ -320,6 +324,11 @@ async function startBot() {
       console.log(
         `[wa] connected as ${state.meJid} (lid: ${state.meLid || "none"})`,
       );
+      if (config.lockdownMode !== false) {
+        console.log(
+          `🔒 LOCKDOWN פעיל — רק ${jidUser(state.meJid)} יכול להשתמש בבוט. מספרים אחרים נדחים אוטומטית.`,
+        );
+      }
       // הודעת ברכה אוטומטית בחיבור הראשון
       if (!config.welcomeSent && config.welcomeMessage) {
         setTimeout(async () => {
@@ -413,8 +422,16 @@ async function handleMessage(msg) {
   // הודעת תשובה של הבוט עצמו (לא self-chat, לא לעבד)
   if (fromMe && !isSelfChat) return;
 
-  // whitelist check (הודעה רגילה ממישהו אחר)
-  if (!isSelfChat && !config.whitelist.includes(remoteUser)) {
+  // אבטחה: lockdown mode — רק self-chat עובר. שום whitelist, שום יוצא מן הכלל.
+  if (config.lockdownMode !== false) {
+    if (!isSelfChat) {
+      console.log(
+        `[skip/lockdown] חסום — רק המספר שסרק את ה-QR: ${remoteUser}`,
+      );
+      return;
+    }
+  } else if (!isSelfChat && !config.whitelist.includes(remoteUser)) {
+    // מצב ישן (lockdown OFF) — whitelist רגיל
     console.log(`[skip] not in whitelist: ${remoteUser}`);
     return;
   }
@@ -543,6 +560,7 @@ const server = http.createServer(async (req, res) => {
         model: config.model,
         mode: config.mode,
         provider: config.provider || "baileys",
+        lockdownMode: config.lockdownMode !== false,
         whitelist: config.whitelist,
         systemPromptAppend: config.systemPromptAppend,
         welcomeMessage: config.welcomeMessage,
@@ -623,8 +641,20 @@ const server = http.createServer(async (req, res) => {
     req.on("end", () => {
       try {
         const next = JSON.parse(body);
+        // אבטחה: ב-lockdown mode, ה-API לא יכול להוסיף מספרים ל-whitelist
+        // ולא יכול לכבות את ה-lockdown עצמו. רק עריכה ידנית של config.json.
+        if (config.lockdownMode !== false) {
+          if (next.whitelist) {
+            console.log("[lockdown] ניסיון לשנות whitelist נחסם");
+            delete next.whitelist;
+          }
+          if (next.lockdownMode === false) {
+            console.log("[lockdown] ניסיון לכבות lockdown דרך API נחסם");
+            delete next.lockdownMode;
+          }
+        }
         config = { ...config, ...next };
-        // safeguard: לוודא שהמספר של עצמו נשאר ב-whitelist
+        // safeguard: לוודא שהמספר של עצמו נשאר ב-whitelist (גם ב-lockdown — לתאימות)
         if (state.meJid) {
           const me = jidUser(state.meJid);
           if (!config.whitelist.includes(me)) config.whitelist.push(me);
