@@ -399,13 +399,16 @@ async function handleMessage(msg) {
   const meLidUser = state.meLid ? jidUser(state.meLid) : null;
   const remoteUser = jidUser(remoteJid);
 
-  // self-chat: ב-WhatsApp החדש זה יכול להגיע ב-2 פורמטים:
+  // self-chat: ב-WhatsApp החדש זה יכול להגיע ב-3 פורמטים:
   //   1. <phone>@s.whatsapp.net  (פורמט ישן)
-  //   2. <LID>@lid               (פורמט חדש)
-  // אנחנו תופסים את שניהם
+  //   2. <LID>@lid               (LID של המכשיר עצמו)
+  //   3. כל @lid עם fromMe=true   (בvarsions חדשות sock.user.lid לא תמיד מוגדר,
+  //      אבל כל הודעת self שעולה ב-Multi-Device מגיעה כ-@lid)
   const isSelfChat =
     fromMe &&
-    (remoteUser === meUser || (meLidUser && remoteUser === meLidUser));
+    (remoteUser === meUser ||
+      (meLidUser && remoteUser === meLidUser) ||
+      remoteJid.endsWith("@lid"));
 
   // הודעת תשובה של הבוט עצמו (לא self-chat, לא לעבד)
   if (fromMe && !isSelfChat) return;
