@@ -46,10 +46,10 @@ command -v claude >/dev/null && echo "claude:OK" || echo "MISSING:claude"
 
 ## שלב 3 — התקנה
 
-מיקום: `~/claude-whatsapp-bot/`
+מיקום: `~/talbs-whatsapp-bot/`
 
 ```bash
-INSTALL=~/claude-whatsapp-bot
+INSTALL=~/talbs-whatsapp-bot
 mkdir -p "$INSTALL/auth"
 SKILL_DIR=~/.claude/skills/talbs-whatsapp-bot
 cp -R "$SKILL_DIR/template/." "$INSTALL/"
@@ -65,7 +65,7 @@ chmod +x "$INSTALL/start.command"
 ```bash
 node -e "
 const fs = require('fs');
-const p = process.env.HOME + '/claude-whatsapp-bot/config.json';
+const p = process.env.HOME + '/talbs-whatsapp-bot/config.json';
 const c = JSON.parse(fs.readFileSync(p));
 c.workdir = process.env.WORKDIR || process.env.HOME;
 fs.writeFileSync(p, JSON.stringify(c, null, 2));
@@ -80,7 +80,7 @@ console.log('workdir set to:', c.workdir);
 ## שלב 5 — התקנת תלויות
 
 ```bash
-cd ~/claude-whatsapp-bot && npm install --ignore-scripts --no-fund --no-audit
+cd ~/talbs-whatsapp-bot && npm install --ignore-scripts --no-fund --no-audit
 ```
 
 ~30 שניות בפעם הראשונה.
@@ -90,7 +90,7 @@ cd ~/claude-whatsapp-bot && npm install --ignore-scripts --no-fund --no-audit
 ## שלב 6 — הפעלה
 
 ```bash
-cd ~/claude-whatsapp-bot && nohup node bot.js > /tmp/talbs-bot.log 2>&1 &
+cd ~/talbs-whatsapp-bot && nohup node bot.js > /tmp/talbs-bot.log 2>&1 &
 disown
 sleep 3
 curl -s http://127.0.0.1:7655/state | head -c 200
@@ -103,7 +103,7 @@ curl -s http://127.0.0.1:7655/state | head -c 200
 ## שלב 7 — קיצור דרך לשולחן (Mac)
 
 ```bash
-ln -sf ~/claude-whatsapp-bot/start.command ~/Desktop/"💛 הבוט שלי.command"
+ln -sf ~/talbs-whatsapp-bot/start.command ~/Desktop/"💛 הבוט שלי.command"
 ```
 
 ---
@@ -157,7 +157,7 @@ print('whitelist:', s['config']['whitelist'])
 ## מבנה ההתקנה
 
 ```
-~/claude-whatsapp-bot/
+~/talbs-whatsapp-bot/
 ├── bot.js              # מנוע (Baileys + Claude CLI)
 ├── index.html          # UI מקומי
 ├── config.json         # הגדרות
