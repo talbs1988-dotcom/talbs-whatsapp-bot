@@ -181,6 +181,23 @@ function isAlreadyHandled(id) {
 // פונקציה אחת לכל שליחת הודעה - שמרשמת את ה-id כדי שלא נטפל בה כשנקבל אותה כ-echo
 async function sendBotMessage(jid, text) {
   try {
+    // 🛡️ אבטחה קריטית — שכבת הגנה אחרונה ביציאה:
+    // לעולם אל תשלח למספר שאינו של בעל המכשיר. גם אם בלוגיקה הפנימית
+    // הייתה בעיה שאיפשרה לעבד הודעה זרה — כאן זה נחסם בכל מקרה.
+    if (config.lockdownMode !== false) {
+      const targetUser = jidUser(jid);
+      const meUser = jidUser(state.meJid);
+      const meLidUser = state.meLid ? jidUser(state.meLid) : null;
+      const isMe = targetUser === meUser || targetUser === meLidUser;
+      if (!isMe) {
+        console.log(
+          `[BLOCKED-SEND] 🚨 חסום שליחה ל-${targetUser} — אינו בעל המכשיר (me=${meUser}, lid=${meLidUser})`,
+        );
+        state.stats.errors++;
+        state.lastError = `blocked send to non-owner ${targetUser}`;
+        return null;
+      }
+    }
     // סימן ויזואלי קבוע — מבדיל את התשובות של הבוט מההודעות שהמשתמש כתב לעצמו ב-self-chat
     const message = text.startsWith("🤖") ? text : `🤖 ${text}`;
     const sent = await sock.sendMessage(jid, { text: message });
@@ -412,16 +429,14 @@ async function handleMessage(msg) {
   const meLidUser = state.meLid ? jidUser(state.meLid) : null;
   const remoteUser = jidUser(remoteJid);
 
-  // self-chat: ב-WhatsApp החדש זה יכול להגיע ב-3 פורמטים:
-  //   1. <phone>@s.whatsapp.net  (פורמט ישן)
-  //   2. <LID>@lid               (LID של המכשיר עצמו)
-  //   3. כל @lid עם fromMe=true   (בvarsions חדשות sock.user.lid לא תמיד מוגדר,
-  //      אבל כל הודעת self שעולה ב-Multi-Device מגיעה כ-@lid)
+  // self-chat: רק כאשר המספר/LID של היעד תואם בדיוק לזה של המכשיר.
+  //   1. <phone>@s.whatsapp.net  (פורמט ישן) — remoteUser === meUser
+  //   2. <LID>@lid               (LID של המכשיר עצמו) — remoteUser === meLidUser
+  // קריטי: לא להשתמש ב-endsWith("@lid") כ-fallback — זה תופס גם איש קשר @lid אחר
+  // ויכול לגרום לבוט לענות ללקוחות כשהמשתמש עונה להם ידנית (fromMe=true).
   const isSelfChat =
     fromMe &&
-    (remoteUser === meUser ||
-      (meLidUser && remoteUser === meLidUser) ||
-      remoteJid.endsWith("@lid"));
+    (remoteUser === meUser || (meLidUser !== null && remoteUser === meLidUser));
 
   // הודעת תשובה של הבוט עצמו (לא self-chat, לא לעבד)
   if (fromMe && !isSelfChat) return;
