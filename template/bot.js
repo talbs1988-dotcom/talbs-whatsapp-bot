@@ -181,7 +181,9 @@ function isAlreadyHandled(id) {
 // פונקציה אחת לכל שליחת הודעה - שמרשמת את ה-id כדי שלא נטפל בה כשנקבל אותה כ-echo
 async function sendBotMessage(jid, text) {
   try {
-    const sent = await sock.sendMessage(jid, { text });
+    // סימן ויזואלי קבוע — מבדיל את התשובות של הבוט מההודעות שהמשתמש כתב לעצמו ב-self-chat
+    const message = text.startsWith("🤖") ? text : `🤖 ${text}`;
+    const sent = await sock.sendMessage(jid, { text: message });
     rememberSentId(sent?.key?.id);
     return sent;
   } catch (e) {
