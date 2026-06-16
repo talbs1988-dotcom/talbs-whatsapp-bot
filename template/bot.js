@@ -35,6 +35,32 @@ if (!fs.existsSync(AUTH_DIR)) {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 }
 
+// ----- Watchdog לזיהוי "דריפט" של Baileys -----
+// Baileys מאבד סנכרון עם WhatsApp אחרי 24-48 שעות (Bad MAC, key counter errors).
+// כשזה קורה הסשן הגרוע נשאר חי אבל לא קורא/כותב כמו שצריך.
+// פתרון: סופרים ניתוקים לא-צפויים. אם 5+ ב-30 דקות → מאתחלים auth ומציגים QR חדש.
+const driftEvents = []; // timestamps של ניתוקים לא-צפויים
+const DRIFT_WINDOW_MS = 30 * 60 * 1000; // 30 דקות
+const DRIFT_THRESHOLD = 5; // 5 ניתוקים בחלון = דריפט מאומת
+let driftRecoveryInProgress = false;
+
+function trackDisconnect() {
+  const now = Date.now();
+  driftEvents.push(now);
+  const cutoff = now - DRIFT_WINDOW_MS;
+  while (driftEvents.length && driftEvents[0] < cutoff) {
+    driftEvents.shift();
+  }
+  console.log(
+    `[watchdog] ניתוקים ב-30 דק' אחרונות: ${driftEvents.length}/${DRIFT_THRESHOLD}`,
+  );
+  return driftEvents.length >= DRIFT_THRESHOLD;
+}
+
+function resetDriftCounter() {
+  driftEvents.length = 0;
+}
+
 // 3 modes that map to Claude CLI permission modes
 const MODE_PERMISSIONS = {
   personal: "bypassPermissions", // עוזר אישי - יוצר ועורך בלי לשאול
@@ -341,6 +367,7 @@ async function startBot() {
       state.meJid = sock.user?.id;
       state.meLid = sock.user?.lid || null;
       state.meName = sock.user?.name || sock.user?.verifiedName || "";
+      resetDriftCounter(); // חיבור הצליח — מאפסים את הספירה
       ensureSelfWhitelisted();
       console.log(
         `[wa] connected as ${state.meJid} (lid: ${state.meLid || "none"})`,
@@ -373,13 +400,37 @@ async function startBot() {
       const loggedOut = code === DisconnectReason.loggedOut;
       console.log(`[wa] closed code=${code} loggedOut=${loggedOut}`);
       state.status = loggedOut ? "logged-out" : "reconnecting";
-      if (loggedOut) {
+
+      // Watchdog: עקוב אחרי ניתוקים לא-צפויים. אם זוהה דריפט (5 ניתוקים ב-30 דק')
+      // → אילוץ סריקה מחדש (הוא הפתרון הוודאי לדריפט של Baileys).
+      let forceRescan = loggedOut;
+      if (!loggedOut && !driftRecoveryInProgress) {
+        const isDrift = trackDisconnect();
+        if (isDrift) {
+          driftRecoveryInProgress = true;
+          console.log(
+            `🔄 [watchdog] דריפט זוהה — מנקה auth ומציג QR חדש לסריקה`,
+          );
+          forceRescan = true;
+          resetDriftCounter();
+          state.status = "needs-rescan";
+          state.lastError = "drift detected — please scan QR again";
+        }
+      }
+
+      if (forceRescan) {
         try {
           fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         } catch {}
         fs.mkdirSync(AUTH_DIR, { recursive: true });
       }
-      setTimeout(startBot, loggedOut ? 1500 : 3000);
+      setTimeout(
+        () => {
+          driftRecoveryInProgress = false;
+          startBot();
+        },
+        forceRescan ? 1500 : 3000,
+      );
     }
   });
 
