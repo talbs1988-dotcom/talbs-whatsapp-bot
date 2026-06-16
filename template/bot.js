@@ -414,7 +414,8 @@ async function startBot() {
           forceRescan = true;
           resetDriftCounter();
           state.status = "needs-rescan";
-          state.lastError = "drift detected — please scan QR again";
+          state.lastError =
+            "החיבור ל-WhatsApp דרש רענון. ייפתח QR חדש לסריקה (10 שניות).";
         }
       }
 
