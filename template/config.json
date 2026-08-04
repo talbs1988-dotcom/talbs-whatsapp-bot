@@ -1,6 +1,6 @@
 {
   "agentName": "הבוט שלי",
-  "workdir": "/Users/talbs/העסק שלי",
+  "workdir": "",
   "model": "sonnet",
   "mode": "personal",
   "provider": "baileys",
