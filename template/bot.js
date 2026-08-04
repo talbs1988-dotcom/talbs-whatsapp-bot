@@ -365,7 +365,7 @@ async function startBot() {
       state.status = "connected";
       state.qr = null;
       state.meJid = sock.user?.id;
-      state.meLid = sock.user?.lid || null;
+      state.meLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
       state.meName = sock.user?.name || sock.user?.verifiedName || "";
       resetDriftCounter(); // חיבור הצליח — מאפסים את הספירה
       ensureSelfWhitelisted();
