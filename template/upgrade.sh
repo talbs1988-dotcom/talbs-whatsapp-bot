@@ -19,6 +19,10 @@ curl -sL https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/m
 
 echo "🤖 וודא שהבוט רשום כשירות אוטומטי..."
 NODE_BIN="$(which node)"
+NODE_DIR="$(dirname "$NODE_BIN")"
+CLAUDE_BIN="$(which claude 2>/dev/null || echo "$HOME/.local/bin/claude")"
+CLAUDE_DIR="$(dirname "$CLAUDE_BIN")"
+BOT_PATH="$HOME/.local/bin:$CLAUDE_DIR:$NODE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 mkdir -p "$HOME/Library/LaunchAgents"
 
 cat > "$PLIST" <<EOF
@@ -53,7 +57,9 @@ cat > "$PLIST" <<EOF
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>$BOT_PATH</string>
+        <key>CLAUDE_BIN</key>
+        <string>$CLAUDE_BIN</string>
     </dict>
 </dict>
 </plist>

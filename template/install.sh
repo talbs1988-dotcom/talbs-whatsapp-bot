@@ -25,6 +25,11 @@ sleep 2
 
 echo "🤖 רושם את הבוט כשירות אוטומטי..."
 NODE_BIN="$(which node)"
+NODE_DIR="$(dirname "$NODE_BIN")"
+CLAUDE_BIN="$(which claude 2>/dev/null || echo "$HOME/.local/bin/claude")"
+CLAUDE_DIR="$(dirname "$CLAUDE_BIN")"
+# ה-PATH של השירות חייב לכלול את המיקום של claude (בד"כ ~/.local/bin) ושל node
+BOT_PATH="$HOME/.local/bin:$CLAUDE_DIR:$NODE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 mkdir -p "$HOME/Library/LaunchAgents"
 
 cat > "$PLIST" <<EOF
@@ -59,7 +64,9 @@ cat > "$PLIST" <<EOF
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>$BOT_PATH</string>
+        <key>CLAUDE_BIN</key>
+        <string>$CLAUDE_BIN</string>
     </dict>
 </dict>
 </plist>
