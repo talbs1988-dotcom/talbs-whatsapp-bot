@@ -653,6 +653,7 @@ const server = http.createServer(async (req, res) => {
     child.stdout.on("data", (d) => (out += d.toString()));
     child.stderr.on("data", (d) => (err += d.toString()));
     child.on("error", (e) => {
+      if (res.headersSent) return;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -663,6 +664,7 @@ const server = http.createServer(async (req, res) => {
       );
     });
     child.on("close", (code) => {
+      if (res.headersSent) return;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
