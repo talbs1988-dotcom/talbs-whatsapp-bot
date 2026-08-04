@@ -483,30 +483,71 @@
         </div>
       </div>
 
-      <details class="settings">
-        <summary>🎭 מה הבוט יודע לעשות (מצב)</summary>
+      <details class="settings" open>
+        <summary>📁 על איזו תיקייה הבוט עובד</summary>
         <div class="body">
-          <label>בחר את רמת ההרשאות של הבוט שלך</label>
+          <label
+            >הבוט הוא העוזר האישי שלך — יוצר קבצים, כותב ומריץ בשבילך, ושואל
+            אותך כאן בצ'אט לפני שהוא משנה או מוחק קבצים קיימים.</label
+          >
+          <label style="margin-top: 14px"
+            >תיקיית העבודה (איפה הוא רואה ויוצר קבצים)</label
+          >
+          <input id="workdir" placeholder="/Users/you" />
+          <small
+            style="
+              color: var(--smoke);
+              font-size: 12px;
+              display: block;
+              margin-top: 4px;
+            "
+          >
+            ברירת מחדל: תיקיית הבית שלך. אפשר להצביע על תיקיית עסק ספציפית — שם
+            הבוט יעבוד.
+          </small>
+          <input type="hidden" id="role" value="personal" />
+          <input type="hidden" id="mode" value="personal" />
+        </div>
+      </details>
+
+      <details class="settings">
+        <summary>📞 איך הבוט מחובר לוואטסאפ</summary>
+        <div class="body">
+          <label>דרך החיבור</label>
           <div class="mode-grid">
-            <div class="mode-card" data-mode="personal">
-              <div class="emoji">🧑‍💻</div>
-              <div class="title">עוזר אישי מלא</div>
+            <div class="mode-card active" data-conn="baileys">
+              <div class="emoji">🟢</div>
+              <div class="title">כרום — חינמי</div>
               <div class="desc">
-                יוצר, עורך ומריץ בלי לשאול. לשימוש פרטי בלבד.
+                פעיל עכשיו. סריקת QR, רץ על המחשב שלך. חינם לגמרי (מתנתק לפעמים
+                ומתחבר לבד).
               </div>
             </div>
-            <div class="mode-card" data-mode="careful">
-              <div class="emoji">🛡️</div>
-              <div class="title">עוזר זהיר</div>
-              <div class="desc">שואל לפני שהוא משנה קבצים. מאוזן.</div>
+            <div class="mode-card" data-conn="green-api" style="opacity: 0.5">
+              <div class="emoji">🔒</div>
+              <div class="title">Green API</div>
+              <div class="desc">
+                שדרוג להמשך — יציב יותר, ~$12/חודש. דורש חשבון.
+              </div>
             </div>
-            <div class="mode-card" data-mode="chat">
-              <div class="emoji">💬</div>
-              <div class="title">צ'אט בלבד</div>
-              <div class="desc">לא נוגע בקבצים. שיחות וייעוץ בלבד.</div>
+            <div class="mode-card" data-conn="cloud" style="opacity: 0.5">
+              <div class="emoji">🔒</div>
+              <div class="title">ענן</div>
+              <div class="desc">
+                שדרוג להמשך — תמיד פעיל בלי המחשב. דורש שרת בתשלום.
+              </div>
             </div>
           </div>
-          <input type="hidden" id="mode" value="personal" />
+          <small
+            style="
+              color: var(--smoke);
+              font-size: 12px;
+              display: block;
+              margin-top: 8px;
+            "
+          >
+            במפגש היום כולם על "כרום — חינמי". את שתי הדרכים האחרות נחבר בהמשך.
+          </small>
         </div>
       </details>
 
@@ -538,9 +579,6 @@
           <label>שם הבוט (איך הוא חותם)</label>
           <input id="agentName" placeholder="הבוט שלי" />
 
-          <label>תיקיית עבודה (איפה הוא רואה קבצים)</label>
-          <input id="workdir" placeholder="/Users/you" />
-
           <label>הוראות אישיות לבוט (system prompt)</label>
           <textarea
             id="systemPromptAppend"
@@ -560,26 +598,6 @@
               Haiku 4.5 — הכי מהיר וזול, פחות חכם (לתשובות קצרות)
             </option>
           </select>
-
-          <label style="margin-top: 18px">חיבור לוואטסאפ</label>
-          <select id="provider" disabled>
-            <option value="baileys" selected>
-              Baileys (פעיל) — חינם, סריקת QR
-            </option>
-            <option value="green-api" disabled>
-              Green API (בקרוב) — יציב יותר, $12/חודש
-            </option>
-          </select>
-          <small
-            style="
-              color: var(--smoke);
-              font-size: 12px;
-              display: block;
-              margin-top: 4px;
-            "
-          >
-            כרגע פעיל Baileys. תמיכה ב-Green API תיווסף בעדכון הבא.
-          </small>
 
           <div style="margin-top: 16px">
             <button class="btn btn-ghost" id="check-claude-btn">
@@ -710,15 +728,35 @@
 
       let lastConfigLoaded = false;
 
-      function setMode(mode) {
-        document.getElementById("mode").value = mode;
-        document.querySelectorAll(".mode-card").forEach((card) => {
-          card.classList.toggle("active", card.dataset.mode === mode);
+      // תפקיד → רמת הרשאות (מצב) מאחורי הקלעים
+      const ROLE_MODE = {
+        personal: "personal",
+        assistant: "careful",
+        service: "chat",
+      };
+      const ROLE_PROMPTS = {
+        personal:
+          'אתה "{agentName}" — Claude Code המלא, מחובר ל-WhatsApp ורץ על המחשב של המשתמש. יש לך גישה מלאה לכל הכלים (קריאה, כתיבה, הרצה, חיפוש). המשתמש הוא בעל העסק — אתה העוזר האישי שלו לניהול היום-יום: לידים, פגישות, משימות, תוכן, כסף. דבר עברית מדוברת, חמה וישירה. תשובות קצרות — זה WhatsApp. תוצאה לפני הסבר. בלי באזוורדס, בלי "איך אפשר לעזור". משימה ברורה — בצע עד הסוף ודווח קצר.',
+        assistant:
+          'אתה "{agentName}" — עוזר לניהול העסק דרך WhatsApp, רץ על המחשב של בעל העסק. אתה עוזר עם לידים, פגישות, משימות, תוכן וכסף. אתה יכול לקרוא ולחפש חופשי, אבל לפני שאתה משנה או מוחק קבצים — שאל אישור. דבר עברית מדוברת, חמה וישירה, תשובות קצרות. תוצאה לפני הסבר, בלי באזוורדס.',
+        service:
+          'אתה "{agentName}" — נציג שירות לקוחות של העסק, עונה ללקוחות ב-WhatsApp. ענה רק על סמך המידע של העסק שנמצא בתיקיית העבודה (מחירון, שאלות נפוצות, שעות, שירותים). דבר בנימוס ובגובה העיניים, בעברית פשוטה — כמו נציג אנושי טוב. תשובות קצרות וברורות. אל תמציא מידע: אם אינך בטוח או אין לך את התשובה — אמור שתעביר לבעל העסק והוא יחזור. אל תיגע בקבצים ואל תבצע פעולות במחשב — רק תן מידע ותשובות.',
+      };
+
+      function setRole(role, applyPrompt) {
+        document.getElementById("role").value = role;
+        document.getElementById("mode").value = ROLE_MODE[role] || "personal";
+        document.querySelectorAll(".role-card").forEach((card) => {
+          card.classList.toggle("active", card.dataset.role === role);
         });
+        if (applyPrompt && ROLE_PROMPTS[role]) {
+          document.getElementById("systemPromptAppend").value =
+            ROLE_PROMPTS[role];
+        }
       }
 
-      document.querySelectorAll(".mode-card").forEach((card) => {
-        card.addEventListener("click", () => setMode(card.dataset.mode));
+      document.querySelectorAll(".role-card").forEach((card) => {
+        card.addEventListener("click", () => setRole(card.dataset.role, true));
       });
 
       function loadConfigIntoForm(cfg) {
@@ -731,7 +769,7 @@
         document.getElementById("welcomeMessage").value =
           cfg.welcomeMessage || "";
         document.getElementById("model").value = cfg.model || "sonnet";
-        setMode(cfg.mode || "personal");
+        setRole(cfg.role || "personal", false);
         if (cfg.agentName) {
           document.getElementById("agent-title").textContent =
             cfg.agentName + " ✨";
@@ -779,6 +817,7 @@
               document.getElementById("systemPromptAppend").value,
             welcomeMessage: document.getElementById("welcomeMessage").value,
             model: document.getElementById("model").value,
+            role: document.getElementById("role").value,
             mode: document.getElementById("mode").value,
           };
           const r = await fetch("/config", {
