@@ -581,7 +581,8 @@ const GREEN_STATE_HE = {
   notAuthorized: "מחכה לסריקת QR",
   blocked: "חסום",
   starting: "מתחיל",
-  yellowCard: "מוגבל זמנית (yellowCard)",
+  yellowCard:
+    "מוגבל זמנית על ידי Green (yellowCard) — קורה אחרי הרבה הודעות ברצף. עובר לבד תוך דקות; לא צריך לעשות כלום",
   sleepMode: "במצב שינה",
 };
 
@@ -611,6 +612,10 @@ async function greenEnsureSettings() {
     console.log(
       `[green] ⚠️ webhookUrl מוגדר ב-instance (${s.webhookUrl}) — ההודעות לא יגיעו לעוזר עד שינוקה`,
     );
+    // מצב יציב למסך (לא מהבהב): הבעיה + מה עושים. ה-polling לא ידרוס אותו.
+    state.status = "green-webhook";
+    state.lastError =
+      "ב-Green API מוגדרת כתובת webhook — ההודעות הולכות לשם ולא לעוזר. בקונסול של Green: הגדרות ← Webhook URL ← למחוק, ואז 'התחבר מחדש'.";
   }
   const want = {
     incomingWebhook: "yes",
@@ -709,6 +714,9 @@ async function startGreenApi() {
   state.lastError = null;
   state.greenLastPoll = Date.now();
   if (state.meJid) ensureSelfWhitelisted();
+  // לפני שמתחילים לענות — מנקים הודעות ישנות שנשארו בתור (מונע תשובות כפולות אחרי ריסטארט)
+  await greenDrainStaleQueue(gen);
+  if (gen !== greenGeneration) return;
   console.log(
     `[green] connected as ${state.meJid || "(המספר יזוהה בהודעה הראשונה)"}`,
   );
@@ -751,7 +759,15 @@ async function greenPollLoop(gen) {
       });
       state.greenLastPoll = Date.now();
       errs = 0;
-      if (state.status === "reconnecting" || state.status === "error") {
+      // חיבור חזר. אבל אם יש webhook שגוזל את ההודעות — נשארים במצב היציב "green-webhook"
+      // (ולא מהבהבים בין "מחובר" ל"בעיה" בכל סבב polling).
+      if (state.greenWebhookConflict) {
+        if (state.status !== "green-webhook") state.status = "green-webhook";
+      } else if (
+        state.status === "reconnecting" ||
+        state.status === "error" ||
+        state.status === "green-webhook"
+      ) {
         state.status = "connected";
         state.lastError = null;
       }
@@ -794,11 +810,84 @@ async function greenPollLoop(gen) {
 }
 
 // מתרגם הודעה של Green API למבנה שה-handleMessage המשותף מכיר (אותה לוגיקה: self-chat, lockdown, echo)
+// ----- Green: מניעת תשובות כפולות -----
+// Green שומר תור של הודעות. אחרי ריסטארט/החלפת ספק, הודעות שכבר נענו (או שהגיעו
+// בזמן שהעוזר היה כבוי) מוגשות שוב — והעוזר היה עונה עליהן פעם נוספת.
+// פתרון: (1) זוכרים אילו idMessage כבר טופלו — גם אחרי ריסטארט (נשמר לקובץ);
+//         (2) בעלייה מרוקנים את התור הישן לפני שמתחילים לענות.
+const GREEN_SEEN_PATH = path.join(__dirname, "green-seen.json");
+let greenSeen = [];
+try {
+  greenSeen = JSON.parse(fs.readFileSync(GREEN_SEEN_PATH, "utf8"));
+  if (!Array.isArray(greenSeen)) greenSeen = [];
+} catch {}
+const greenSeenSet = new Set(greenSeen);
+function greenAlreadyHandled(id) {
+  if (!id) return false;
+  if (greenSeenSet.has(id)) return true;
+  greenSeenSet.add(id);
+  greenSeen.push(id);
+  if (greenSeen.length > 500) {
+    const drop = greenSeen.splice(0, greenSeen.length - 300);
+    drop.forEach((x) => greenSeenSet.delete(x));
+  }
+  try {
+    fs.writeFileSync(GREEN_SEEN_PATH, JSON.stringify(greenSeen));
+  } catch {}
+  return false;
+}
+// מרוקן את התור שנשאר ב-Green מלפני העלייה (הודעות ישנות — לא עונים עליהן שוב)
+async function greenDrainStaleQueue(gen) {
+  let drained = 0;
+  for (let i = 0; i < 200 && gen === greenGeneration; i++) {
+    let n;
+    try {
+      n = await greenCall("receiveNotification", {
+        query: "?receiveTimeout=1",
+        timeoutMs: 8000,
+      });
+    } catch {
+      break;
+    }
+    if (!n || n.receiptId == null) break;
+    // הודעות: מסמנים כטופלו ומוחקים. אירועי מצב: נותנים להם לעבור (חשובים).
+    const t = n.body?.typeWebhook;
+    if (t === "incomingMessageReceived" || t === "outgoingMessageReceived") {
+      greenAlreadyHandled(n.body?.idMessage);
+      drained++;
+    } else {
+      try {
+        await handleGreenNotification(n.body || {});
+      } catch {}
+    }
+    try {
+      await greenCall("deleteNotification", {
+        verb: "DELETE",
+        extraPath: `/${n.receiptId}`,
+        timeoutMs: 10000,
+      });
+    } catch {
+      break;
+    }
+  }
+  if (drained)
+    console.log(
+      `[green] ניקיתי ${drained} הודעות ישנות מהתור — לא עונים עליהן שוב`,
+    );
+}
+
+// מצבים חולפים של Green מיד אחרי סריקה (starting/…) — לא ניתוק. ריסטארט רק על ניתוק אמיתי.
+const GREEN_REAL_DISCONNECT = new Set([
+  "notAuthorized",
+  "blocked",
+  "sleepMode",
+]);
+
 async function handleGreenNotification(body) {
   const type = body.typeWebhook;
   if (type === "stateInstanceChanged") {
     console.log(`[green] state changed → ${body.stateInstance}`);
-    if (body.stateInstance && body.stateInstance !== "authorized") {
+    if (GREEN_REAL_DISCONNECT.has(body.stateInstance)) {
       state.status = "reconnecting";
       state.lastError = "החיבור לוואטסאפ נותק ב-Green API — מכין QR חדש";
       greenRestart(1000);
@@ -807,6 +896,11 @@ async function handleGreenNotification(body) {
   }
   if (type !== "incomingMessageReceived" && type !== "outgoingMessageReceived")
     return;
+  // הודעה שכבר טופלה (תור ישן / הגשה חוזרת) — לא עונים פעמיים
+  if (greenAlreadyHandled(body.idMessage)) {
+    console.log(`[green/skip-dup] ${body.idMessage}`);
+    return;
+  }
   const wid = body.instanceData?.wid;
   if (!state.meJid && wid) {
     state.meJid = wid;

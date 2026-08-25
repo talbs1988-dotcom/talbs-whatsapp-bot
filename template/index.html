@@ -1322,6 +1322,16 @@
         } else if (s.status === "connecting") {
           setStatusBadge("מתחבר ל-Green API...", "");
           renderReconnecting(s.lastError || "מתחבר ל-Green API...");
+        } else if (s.status === "green-webhook") {
+          // מצב יציב (לא מהבהב): Green מחובר, אבל webhook גוזל את ההודעות. מראים מה לעשות.
+          setStatusBadge("מחובר — אבל ההודעות לא מגיעות", "error");
+          document.getElementById("hero-body").innerHTML = `
+        <div class="big-check">⚠️</div>
+        <h2 style="font-size:20px; font-weight:600;">Green API מחובר, אבל ההודעות הולכות למקום אחר</h2>
+        <div class="send-test" style="background:#fff4e5; border:1px solid #f5c26b; margin-top:14px;">
+          <p>${(s.lastError || "").replace(/</g, "&lt;")}</p>
+        </div>
+        <button class="btn btn-ghost" style="margin-top:14px" onclick="document.getElementById('reset-btn').click()">🔄 ניקיתי — התחבר מחדש</button>`;
         } else if (s.status === "green-setup") {
           setStatusBadge("צריך פרטי Green API", "error");
           renderGreenSetup(s);
@@ -1349,6 +1359,16 @@
             role: document.getElementById("role").value,
             mode: document.getElementById("mode").value,
           };
+          // Green API: אם מילאו פרטים — "שמירת הגדרות" שומרת גם אותם (לא רק כפתור החיבור).
+          // טוקן ריק = לא לגעת בקיים (המסך לא מציג אותו אף פעם).
+          {
+            const gi = (document.getElementById("greenInstanceId") || {}).value;
+            const gt = (document.getElementById("greenToken") || {}).value;
+            const instanceId = String(gi || "").replace(/\D/g, "");
+            if (instanceId || String(gt || "").trim()) {
+              next.greenApi = { instanceId, token: String(gt || "").trim() };
+            }
+          }
           // קובץ ההנחיות נשמר בנפרד — לתיקיית העבודה (לא ל-config)
           fetch("/brain", {
             method: "POST",
@@ -1364,6 +1384,9 @@
             const flash = document.getElementById("saved-flash");
             flash.classList.add("show");
             setTimeout(() => flash.classList.remove("show"), 1500);
+            // אבטחה: הטוקן נשמר ב-.env — לא משאירים אותו גלוי בשדה על המסך
+            const tokField = document.getElementById("greenToken");
+            if (tokField) tokField.value = "";
             if (next.agentName) {
               document.getElementById("agent-title").textContent =
                 next.agentName + " ✨";
