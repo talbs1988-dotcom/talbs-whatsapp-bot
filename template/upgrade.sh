@@ -1,6 +1,6 @@
 #!/bin/bash
-# upgrade.sh — שדרוג בוט קיים בלי לאבד את החיבור (auth/) ובלי לסרוק QR מחדש
-# מתבצע פעם אחת על-ידי תלמיד שכבר התקין בעבר.
+# upgrade.sh — עדכון העוזר האישי לגרסה העדכנית, בלי לאבד את החיבור וההגדרות
+# למי שכבר התקין. שומר config.json + auth (אין צורך לסרוק QR מחדש).
 set -e
 
 BOT_DIR="$HOME/talbs-whatsapp-bot"
@@ -8,16 +8,40 @@ PORT=7655
 LABEL="com.talbs.workshop-bot"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="/tmp/talbs-bot.log"
+UID_="$(id -u)"
+RAW="https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/main/template"
 
 if [ ! -d "$BOT_DIR" ]; then
-  echo "❌ לא נמצאה תיקיית הבוט. הריצו קודם את ההתקנה המלאה."
+  echo "⚠️ העוזר לא מותקן עדיין. הריצו את פקודת ההתקנה מהפורטל."
   exit 1
 fi
 
-echo "📦 מוריד גרסה חדשה של bot.js (auth נשמר)..."
-curl -sL https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/main/template/bot.js -o "$BOT_DIR/bot.js"
+# ---------- 1) קודם כל: לעצור את הגרסה הישנה ----------
+# לפני החלפת הקבצים — אחרת הישנה ממשיכה להגיש את המסך הישן מהזיכרון.
+echo "🛑 עוצר את הגרסה הנוכחית..."
+launchctl bootout "gui/$UID_/$LABEL" 2>/dev/null || true
+launchctl unload "$PLIST" 2>/dev/null || true
+OLD_PID="$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null || true)"
+[ -n "$OLD_PID" ] && kill $OLD_PID 2>/dev/null || true
+for i in $(seq 1 20); do
+  lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 || break
+  sleep 0.5
+done
 
-echo "🤖 וודא שהבוט רשום כשירות אוטומטי..."
+# ---------- 2) מעדכנים את *כל* קבצי התוכנה (לא רק את המנוע) ----------
+# עדכון של bot.js בלבד משאיר מסך ישן עם מנוע חדש — בדיוק הברדק שרוצים למנוע.
+echo "📦 מוריד את הגרסה העדכנית..."
+cd "$BOT_DIR"
+for f in bot.js index.html package.json start.command; do
+  curl -sfL "$RAW/$f?n=$(date +%s)" -o "$f.new" && mv "$f.new" "$f"
+done
+# config.json + auth נשארים כמו שהם (ההגדרות והחיבור של המשתמש)
+
+echo "📚 מעדכן תלויות..."
+npm install --ignore-scripts --no-fund --no-audit --silent
+
+# ---------- 3) רושמים מחדש ומפעילים ----------
+echo "🤖 מפעיל מחדש..."
 NODE_BIN="$(which node)"
 NODE_DIR="$(dirname "$NODE_BIN")"
 CLAUDE_BIN="$(which claude 2>/dev/null || echo "$HOME/.local/bin/claude")"
@@ -65,19 +89,24 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
-echo "🔄 מפעיל מחדש את הבוט..."
-launchctl unload "$PLIST" 2>/dev/null || true
-lsof -ti:$PORT 2>/dev/null | xargs kill 2>/dev/null || true
-sleep 2
-launchctl load -w "$PLIST"
-sleep 4
+launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
 
-if lsof -ti:$PORT >/dev/null 2>&1; then
+# ---------- 4) אימות אמיתי: המסך המוגש הוא הגרסה החדשה ----------
+OK=""
+for i in $(seq 1 30); do
+  curl -s "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q 'data-tab="home"' && { OK=1; break; }
+  sleep 0.5
+done
+
+if [ -n "$OK" ]; then
   echo ""
-  echo "✅ הבוט עודכן ופועל."
-  echo "✅ לא נדרשה סריקה מחדש — החיבור הקיים נשמר."
-  echo "✅ אם המק יכובה — הבוט יקום אוטומטית כשתפעיל מחדש."
+  echo "✅ העוזר האישי עודכן ופועל — הגרסה העדכנית."
+  echo "✅ לא נדרשה סריקה מחדש — החיבור וההגדרות נשמרו."
+  echo "✅ אם המחשב יכובה — העוזר יקום אוטומטית כשתפעילו מחדש."
+  echo ""
+  open "http://127.0.0.1:$PORT"
 else
-  echo "⚠️ הבוט לא עלה. בדוק לוג: cat $LOG"
+  echo "⚠️ העדכון הסתיים אבל המסך המוגש אינו הגרסה החדשה."
+  echo "   בדקו לוג: cat $LOG"
   exit 1
 fi
