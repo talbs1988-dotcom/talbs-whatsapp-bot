@@ -37,11 +37,19 @@ rm -rf /tmp/talbs-whatsapp-bot-main
 curl -sL https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/main.tar.gz | tar -xz -C /tmp
 # שומרים הגדרות וחיבור קיימים (מי שמתקין מחדש לא מאבד את ה-QR ואת ההנחיות)
 KEEP="$(mktemp -d)"
-[ -f "$BOT_DIR/config.json" ] && cp "$BOT_DIR/config.json" "$KEEP/" || true
+# כל מה ששייך למשתמש ולא לקוד: הגדרות, החיבור (auth), הטוקן (.env),
+# זיכרון השיחות (sessions), הודעות שכבר נענו (green-seen), היסטוריה (feed).
+# התקנה חוזרת מעדכנת קוד — לא מוחקת את מה שהתלמיד בנה.
+for f in config.json .env sessions.json green-seen.json feed.json; do
+  [ -f "$BOT_DIR/$f" ] && cp "$BOT_DIR/$f" "$KEEP/" || true
+done
 [ -d "$BOT_DIR/auth" ] && cp -R "$BOT_DIR/auth" "$KEEP/" || true
 rm -rf "$BOT_DIR"
 mv /tmp/talbs-whatsapp-bot-main/template "$BOT_DIR"
-[ -f "$KEEP/config.json" ] && cp "$KEEP/config.json" "$BOT_DIR/config.json" || true
+for f in config.json .env sessions.json green-seen.json feed.json; do
+  [ -f "$KEEP/$f" ] && cp "$KEEP/$f" "$BOT_DIR/$f" || true
+done
+[ -f "$BOT_DIR/.env" ] && chmod 600 "$BOT_DIR/.env" || true
 [ -d "$KEEP/auth" ] && cp -R "$KEEP/auth" "$BOT_DIR/auth" || true
 rm -rf "$KEEP"
 cd "$BOT_DIR"

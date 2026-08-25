@@ -311,9 +311,9 @@ function ensureSelfWhitelisted() {
 }
 
 // ----- Claude CLI invocation -----
-function askClaude(userJid, text) {
+function askClaude(userJid, text, opts = {}) {
   return new Promise((resolve) => {
-    const sessionId = sessions[userJid];
+    const sessionId = opts.noResumeRetry ? null : sessions[userJid];
     // mode (personal/careful/chat) → CLI permission-mode
     const permissionMode =
       MODE_PERMISSIONS[config.mode] ||
@@ -393,9 +393,25 @@ function askClaude(userJid, text) {
       clearTimeout(killer);
       if (code !== 0) {
         console.error("[claude] exit", code, stderr.slice(0, 500));
+        // Claude Code שומר שיחות לפי תיקייה. אם ה-session נוצר בתיקייה אחרת (המשתמש
+        // בחר תיקייה חדשה) — "No conversation found". לא להציג שגיאה: לשכוח את ה-session
+        // ולנסות שוב פעם אחת בלי --resume. התלמיד מקבל תשובה, לא "❌".
+        if (
+          sessionId &&
+          !opts.noResumeRetry &&
+          /No conversation found|session/i.test(stderr)
+        ) {
+          console.log("[claude] session לא תקף בתיקייה הזו — מתחיל שיחה חדשה");
+          delete sessions[userJid];
+          saveSessions();
+          resolve(askClaude(userJid, text, { noResumeRetry: true }));
+          return;
+        }
+        // שגיאה אמיתית — להראות מה קרה, לא משפט גנרי שמפנה למקום הלא נכון
+        const why = stderr.trim().split("\n").pop() || `קוד ${code}`;
         resolve({
           ok: false,
-          text: "❌ שגיאה בשיחה עם Claude. בדוק שה-CLI מחובר.",
+          text: `❌ Claude לא הצליח לענות: ${why.slice(0, 160)}`,
         });
         return;
       }
@@ -710,8 +726,9 @@ async function startGreenApi() {
   } catch (e) {
     console.log("[green] getWaSettings failed:", e.message);
   }
-  if (!phone)
-    phone = String(process.env.GREEN_API_MY_PHONE || "").replace(/\D/g, "");
+  // אין fallback ממשתנה סביבה: המספר שמותר לדבר עם העוזר נקבע רק על ידי
+  // Green (getWaSettings) או על ידי ההודעה הראשונה מהטלפון (wid) — לא על ידי
+  // ערך שמישהו הגדיר במחשב. אחרת משתנה סביבה יכול להחליף את גבול האבטחה.
   state.meJid = phone ? `${phone}@c.us` : null;
   state.qr = null;
   state.status = "connected";
@@ -1170,10 +1187,13 @@ async function handleMessage(msg) {
   // זיהוי "intro mode" — פתיחת שיחה ("היי" / "שלום" / "מה אתה יודע")
   // → אפס session id (שלא ימשיך מסשן ישן) + שלח prompt מורחב להצגה עצמית
   const trimmedText = text.trim();
+  // "פתיחת שיחה" = ההודעה כולה היא ברכה. לא "כל הודעה קצרה" —
+  // אחרת "כן"/"אשר"/"תודה" (התשובה לשאלת האישור של העוזר!) היו מוחקים את השיחה.
+  // הערה: \b לא עובד עם עברית, לכן בודקים את כל המחרוזת ולא גבול-מילה.
   const isIntroQuery =
-    /^(היי|הי|שלום|מה אתה יודע|מה אתה יכול|hi|hello|hey)\b/i.test(
+    /^(היי|הי|שלום|הלו|מה אתה יודע|מה אתה יכול|hi|hello|hey)[\s!.,?👋🙂]*$/i.test(
       trimmedText,
-    ) || trimmedText.length < 6;
+    );
 
   let textToSend = text;
   if (isIntroQuery) {
@@ -1248,6 +1268,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/state") {
     const safe = {
       ...state,
+      // מזהה הפעלה: מתחלף בכל עלייה. המסך משווה — אם השתנה, הוא מרענן את עצמו
+      // (אחרת הוא ממשיך עם מפתח ישן וכל לחיצה נכשלת בשקט).
+      bootId: APP_NONCE.slice(0, 12),
       config: {
         agentName: config.agentName,
         workdir: config.workdir,
@@ -1383,6 +1406,15 @@ const server = http.createServer(async (req, res) => {
           delete next.provider;
         if (next.provider && next.provider !== (config.provider || "baileys"))
           needsRestart = true;
+        // תיקייה חדשה = שיחות של Claude מתיקייה אחרת לא תקפות. מאפסים כדי לא לקבל "❌".
+        if (
+          next.workdir !== undefined &&
+          String(next.workdir || "") !== String(config.workdir || "")
+        ) {
+          sessions = {};
+          saveSessions();
+          console.log("[sessions] workdir השתנה — שיחות אופסו");
+        }
         config = { ...config, ...next };
         // safeguard: לוודא שהמספר של עצמו נשאר ב-whitelist (גם ב-lockdown — לתאימות)
         if (state.meJid) {
@@ -1540,6 +1572,8 @@ const server = http.createServer(async (req, res) => {
       }
       config.workdir = picked;
       saveConfig(config);
+      sessions = {};
+      saveSessions(); // תיקייה חדשה → שיחות Claude מתיקייה אחרת לא תקפות
       console.log(`[workdir] set to: ${picked}`);
       res.end(JSON.stringify({ ok: true, workdir: picked }));
     });
@@ -1566,6 +1600,8 @@ const server = http.createServer(async (req, res) => {
         fs.mkdirSync(dir, { recursive: true });
         config.workdir = dir;
         saveConfig(config);
+        sessions = {};
+        saveSessions(); // תיקייה חדשה → שיחות Claude מתיקייה אחרת לא תקפות
         console.log(`[workdir] created + set: ${dir}`);
         res.end(JSON.stringify({ ok: true, workdir: dir }));
       } catch (e) {

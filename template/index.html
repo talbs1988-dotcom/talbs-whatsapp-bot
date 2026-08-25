@@ -903,7 +903,17 @@
           const headers = new Headers(init.headers || {});
           if (nonce) headers.set("X-App-Nonce", nonce);
           init.headers = headers;
-          return realFetch(input, init);
+          const method = String(init.method || "GET").toUpperCase();
+          return realFetch(input, init).then((r) => {
+            // העוזר הופעל מחדש → המפתח של הדף הזה כבר לא תקף. לא לשתוק — לרענן.
+            if (r.status === 403 && method !== "GET") {
+              alert(
+                "העוזר הופעל מחדש, והמסך צריך להתרענן. לוחצים אישור וזה מסתדר.",
+              );
+              location.reload();
+            }
+            return r;
+          });
         };
       })();
 
@@ -1304,6 +1314,14 @@
           renderError("השרת לא מגיב — וודאו שה-Terminal עם העוזר עוד פתוח.");
           return;
         }
+        // העוזר הופעל מחדש (bootId השתנה) → הדף הזה מחזיק מפתח ישן. מרעננים לבד.
+        if (s.bootId) {
+          if (!window.__bootId) window.__bootId = s.bootId;
+          else if (window.__bootId !== s.bootId) {
+            location.reload();
+            return;
+          }
+        }
         loadConfigIntoForm(s.config);
         renderFeed(s.feed);
 
@@ -1380,6 +1398,20 @@
             method: "POST",
             body: JSON.stringify(next),
           });
+          if (!r.ok) {
+            // לא לשתוק: התלמיד צריך לדעת שלא נשמר, ולמה
+            const flash = document.getElementById("saved-flash");
+            flash.textContent = "❌ לא נשמר — נסו לרענן את הדף";
+            flash.style.background = "#fee2e2";
+            flash.style.color = "#991b1b";
+            flash.classList.add("show");
+            setTimeout(() => {
+              flash.classList.remove("show");
+              flash.textContent = "נשמר ✓";
+              flash.style.background = "";
+              flash.style.color = "";
+            }, 4000);
+          }
           if (r.ok) {
             const flash = document.getElementById("saved-flash");
             flash.classList.add("show");
