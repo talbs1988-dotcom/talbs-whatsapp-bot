@@ -32,9 +32,21 @@ done
 # עדכון של bot.js בלבד משאיר מסך ישן עם מנוע חדש — בדיוק הברדק שרוצים למנוע.
 echo "📦 מוריד את הגרסה העדכנית..."
 cd "$BOT_DIR"
+# אטומי: מורידים הכל לתיקייה זמנית, ומחליפים רק אם *כל* הקבצים ירדו.
+# אחרת (ניתוק רגעי, 404) היו נשארים מנוע חדש + מסך ישן — בדיוק הברדק שרוצים למנוע.
+TMPD="$(mktemp -d)"
 for f in bot.js index.html package.json start.command; do
-  curl -sfL "$RAW/$f?n=$(date +%s)" -o "$f.new" && mv "$f.new" "$f"
+  if ! curl -sfL "$RAW/$f?n=$(date +%s)" -o "$TMPD/$f"; then
+    echo "⚠️ ההורדה של $f נכשלה — בדקו חיבור לאינטרנט ונסו שוב. שום דבר לא שונה."
+    rm -rf "$TMPD"
+    launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null || true
+    exit 1
+  fi
 done
+for f in bot.js index.html package.json start.command; do
+  mv "$TMPD/$f" "$f"
+done
+rm -rf "$TMPD"
 # config.json + auth נשארים כמו שהם (ההגדרות והחיבור של המשתמש)
 
 echo "📚 מעדכן תלויות..."

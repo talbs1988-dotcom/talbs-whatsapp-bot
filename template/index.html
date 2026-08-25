@@ -1340,6 +1340,14 @@
         } else if (s.status === "connecting") {
           setStatusBadge("מתחבר ל-Green API...", "");
           renderReconnecting(s.lastError || "מתחבר ל-Green API...");
+        } else if (s.status === "green-settings") {
+          // חיבור ראשון ל-Green: ההגדרות מוחלות (עד 5 דקות). מצב רגוע, לא "שגיאה".
+          setStatusBadge("מגדיר את החיבור…", "");
+          document.getElementById("hero-body").innerHTML = `
+        <div class="spinner"></div>
+        <h2 style="font-size:20px; font-weight:600; margin-top:14px;">רגע, מגדיר את החיבור ב-Green API</h2>
+        <p style="color:var(--smoke); margin-top:8px; max-width:46ch; margin-inline:auto;">בפעם הראשונה זה לוקח עד 5 דקות — Green מפעיל מחדש את החיבור. לא צריך לעשות כלום, המסך יתעדכן לבד.</p>
+        <p style="color:var(--smoke); font-size:12px; margin-top:8px;">${(s.lastError || "").replace(/</g, "&lt;")}</p>`;
         } else if (s.status === "green-webhook") {
           // מצב יציב (לא מהבהב): Green מחובר, אבל webhook גוזל את ההודעות. מראים מה לעשות.
           setStatusBadge("מחובר — אבל ההודעות לא מגיעות", "error");
