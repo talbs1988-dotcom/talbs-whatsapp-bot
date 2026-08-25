@@ -1,5 +1,5 @@
 // talbs-whatsapp-bot — בוט WhatsApp + Claude עם תיקון self-chat
-// בנוי לסדנה של טל בשור.
+// טל בשור · עסק שעובד בשבילך.
 // נקודות מפתח:
 //   1. self-chat עובד מהקופסה — אין צורך במספר טלפון שני
 //   2. ה-JID של המכשיר נכנס אוטומטית ל-whitelist בעת ההתחברות
@@ -68,18 +68,18 @@ const MODE_PERMISSIONS = {
   chat: "plan", // צ'אט בלבד - לא נוגע
 };
 
-const DEFAULT_SYSTEM_PROMPT = `אתה "{agentName}" — Claude Code המלא, מחובר ל-WhatsApp ורץ על המק של המשתמש.
+const DEFAULT_SYSTEM_PROMPT = `אתה "{agentName}" — Claude Code המלא, מחובר ל-WhatsApp ורץ על המחשב של המשתמש.
 
 הכלים שלך:
 יש לך גישה מלאה לכל כלי Claude Code: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch.
 אתה יכול:
-- לקרוא ולערוך קבצים בכל מקום על המק (לא רק ב-workdir הנוכחי)
+- לקרוא ולערוך קבצים בכל מקום על המחשב (לא רק ב-workdir הנוכחי)
 - להריץ פקודות bash, לבנות קוד, להתקין חבילות
 - לחקור פרויקטים (אם המשתמש מציין נתיב כמו ~/Projects/X)
 - לחפש באינטרנט ולמשוך דפים
 
 הקהל שלך:
-בעל עסק שירותים שמשתתף בסדנה של טל בשור. הוא משתמש בך לניהול היומיום העסקי דרך WhatsApp — לידים, פגישות, משימות, תוכן, כסף.
+בעל עסק שמשתמש בך לניהול היומיום העסקי דרך WhatsApp — לידים, פגישות, משימות, תוכן, כסף.
 
 איך אתה מדבר:
 - עברית מדוברת, חמה אבל ישירה
@@ -97,7 +97,7 @@ const DEFAULT_SYSTEM_PROMPT = `אתה "{agentName}" — Claude Code המלא, מ
 
 חשוב: התחל כל תשובה שלך באמוג'י רובוט 🤖 ורווח (לדוגמה: "🤖 הוספתי לקלנדר..."). זה הסימן הויזואלי שמבדיל בין מה שאתה עונה לבין מה שהמשתמש כתב לעצמו בצ'אט.`;
 
-const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני הבוט שלך מהסדנה של טל בשור.
+const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני העוזר האישי שלך — טל בשור, עסק שעובד בשבילך.
 
 לפני שמתחילים — *לפנות אליך בלשון זכר או נקבה?*
 תענה/י לי במילה אחת: *זכר* או *נקבה*
@@ -111,11 +111,16 @@ const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני הבוט שלך מהסדנה
 
 function defaultConfig() {
   return {
-    agentName: "הבוט שלי",
+    agentName: "העוזר האישי שלי",
     workdir: process.env.HOME,
     model: "sonnet",
     mode: "personal",
     provider: "baileys", // TODO: support "green-api" in future
+    // זהות ותפקיד — נכתב מהמסך, מרכיב את המוח יחד עם ה-systemPrompt
+    botRole: "",
+    botTone: "",
+    botDos: "",
+    botDonts: "",
     gender: "", // "male" | "female" | "" - מתעדכן אוטומטית מתשובת המשתמש
     // אבטחה: כשדגל זה דלוק, רק self-chat (המספר שסרק את ה-QR) יכול להשתמש בבוט.
     // הודעות ממספרים אחרים נדחות לחלוטין — גם אם הם ב-whitelist.
@@ -275,11 +280,32 @@ function askClaude(userJid, text) {
     if (sessionId) {
       args.push("--resume", sessionId);
     }
-    // בניית system prompt — מילוי placeholders + הוספת gender
+    // בניית system prompt — מילוי placeholders + זהות/תפקיד מהמסך + gender
     let systemPrompt = (config.systemPromptAppend || "").replace(
       /\{agentName\}/g,
-      config.agentName || "הבוט שלך",
+      config.agentName || "העוזר שלך",
     );
+    // זהות ותפקיד שהמשתמש הגדיר במסך — מתווספים על גבי המוח הבסיסי
+    const idParts = [];
+    if (config.botRole) idParts.push(`התפקיד שלך: ${config.botRole}`);
+    if (config.botTone) idParts.push(`הטון שלך: ${config.botTone}`);
+    if (config.botDos) idParts.push(`חשוב שתעשה: ${config.botDos}`);
+    if (config.botDonts) idParts.push(`אסור לך: ${config.botDonts}`);
+    if (idParts.length) {
+      systemPrompt += `\n\n--- ההגדרות של בעל העסק (גובר על הכל) ---\n${idParts.join("\n")}`;
+    }
+    // קובץ ההנחיות (העוזר-שלי.md בתיקיית העבודה) — המוח של העוזר, נקרא בכל הודעה.
+    // המשתמש עורך אותו מהמסך או ישירות במחשב; שינוי נכנס לתוקף מיד.
+    try {
+      const brainPath = path.join(
+        config.workdir || process.env.HOME,
+        "העוזר-שלי.md",
+      );
+      const brain = fs.readFileSync(brainPath, "utf8").trim();
+      if (brain) {
+        systemPrompt += `\n\n--- קובץ ההנחיות של בעל העסק (גובר על הכל) ---\n${brain}`;
+      }
+    } catch {}
     if (config.gender === "male") {
       systemPrompt += "\n\nחשוב: התייחס למשתמש בלשון זכר תמיד.";
     } else if (config.gender === "female") {
@@ -336,6 +362,41 @@ function askClaude(userJid, text) {
   });
 }
 
+// ----- החלפת מודל מהוואטסאפ ("תעבור לאופוס" / "תחזור לסונט") -----
+// עובד לכל provider (כרום/Green). משותף.
+const MODEL_ALIASES = [
+  { rx: /(אופוס|opus)/i, model: "opus", name: "אופוס 5" },
+  { rx: /(סונטה|סונט|sonnet)/i, model: "sonnet", name: "סונט" },
+  { rx: /(הייקו|haiku)/i, model: "haiku", name: "הייקו" },
+];
+function detectModelSwitch(text) {
+  const t = (text || "").trim();
+  // חייבת להיות כוונת החלפה מפורשת — לא סתם אזכור המילה במשפט
+  const hasVerb =
+    /^(תעבור|עבור|תחזור|חזור|תחליף|החלף|תשנה|שנה|מודל|model|switch|use)(\s|ל|$)/i.test(
+      t,
+    );
+  const bare = t.replace(/^(ל|מודל\s*|model\s*)/i, "").trim();
+  const isBareModel = /^(אופוס|opus|סונטה|סונט|sonnet|הייקו|haiku)$/i.test(
+    bare,
+  );
+  if (!hasVerb && !isBareModel) return null;
+  for (const a of MODEL_ALIASES) {
+    if (a.rx.test(t)) return a;
+  }
+  return null;
+}
+// מחזיר טקסט אישור אם הייתה החלפה, אחרת null (ואז ההודעה ממשיכה כרגיל ל-Claude)
+function applyModelSwitch(text) {
+  const m = detectModelSwitch(text);
+  if (!m) return null;
+  if (config.model === m.model) return `כבר על ${m.name} 👍`;
+  config.model = m.model;
+  saveConfig(config);
+  console.log(`[model] switched to ${m.model}`);
+  return `עברתי ל${m.name}. מעכשיו אני עונה עם המודל הזה 💪`;
+}
+
 // ----- WhatsApp socket -----
 let sock;
 
@@ -348,7 +409,7 @@ async function startBot() {
     auth: authState,
     printQRInTerminal: false,
     logger: pino({ level: "silent" }),
-    browser: ["הבוט של טל", "Chrome", "1.0"],
+    browser: ["העוזר האישי", "Chrome", "1.0"],
     syncFullHistory: false,
   });
 
@@ -374,7 +435,7 @@ async function startBot() {
       );
       if (config.lockdownMode !== false) {
         console.log(
-          `🔒 LOCKDOWN פעיל — רק ${jidUser(state.meJid)} יכול להשתמש בבוט. מספרים אחרים נדחים אוטומטית.`,
+          `🔒 LOCKDOWN פעיל — רק ${jidUser(state.meJid)} יכול להשתמש בעוזר. מספרים אחרים נדחים אוטומטית.`,
         );
       }
       // הודעת ברכה אוטומטית בחיבור הראשון
@@ -524,6 +585,15 @@ async function handleMessage(msg) {
     `[in${isSelfChat ? "/self" : ""}] ${remoteUser}: ${text.slice(0, 80)}`,
   );
 
+  // החלפת מודל מהוואטסאפ ("תעבור לאופוס" / "תחזור לסונט")
+  const modelReply = applyModelSwitch(text);
+  if (modelReply) {
+    await sendBotMessage(remoteJid, modelReply);
+    state.stats.messagesOut++;
+    pushFeed({ dir: "out", to: remoteUser, text: modelReply });
+    return;
+  }
+
   // זיהוי לשון פנייה — אם זו ההודעה הראשונה אחרי הברכה, ולא ניתן עדיין
   if (!config.gender) {
     const trimmed = text.trim();
@@ -578,7 +648,7 @@ async function handleMessage(msg) {
 
 זו תחילת השיחה איתו. הצג את עצמך בהודעת WhatsApp קצרה ומסודרת:
 
-1. שורת פתיחה: "היי 👋 אני ${config.agentName || "הבוט שלך"}"
+1. שורת פתיחה: "היי 👋 אני ${config.agentName || "העוזר שלך"}"
 2. שורה אחת מה אתה — "אני Claude Code שלך, מחובר ל-WhatsApp"
 3. רשימת bullet קצרה (3-5) של מה אתה יודע לעשות. כלול אינטגרציות אמיתיות שיש לך (בדוק את הכלים ש-MCPs שזמינים לך — כמו Google Drive, Calendar, Airtable, Composio, ועוד)
 4. סגור עם הזמנה לבקש משהו ספציפי
@@ -634,6 +704,10 @@ const server = http.createServer(async (req, res) => {
         lockdownMode: config.lockdownMode !== false,
         whitelist: config.whitelist,
         systemPromptAppend: config.systemPromptAppend,
+        botRole: config.botRole || "",
+        botTone: config.botTone || "",
+        botDos: config.botDos || "",
+        botDonts: config.botDonts || "",
         welcomeMessage: config.welcomeMessage,
         welcomeSent: config.welcomeSent,
       },
@@ -753,6 +827,135 @@ const server = http.createServer(async (req, res) => {
     res.end('{"ok":true}');
     setTimeout(() => process.exit(0), 500);
     return;
+  }
+
+  // POST /pick-folder — פותח את חלון בחירת התיקייה של המחשב (Mac/Windows)
+  // התלמיד לא מקליד נתיבים. בוחר, וזהו.
+  if (req.method === "POST" && url.pathname === "/pick-folder") {
+    const isWin = process.platform === "win32";
+    const cmd = isWin ? "powershell" : "osascript";
+    const args = isWin
+      ? [
+          "-NoProfile",
+          "-Command",
+          "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'בחר תיקייה לעוזר'; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }",
+        ]
+      : [
+          "-e",
+          'POSIX path of (choose folder with prompt "בחר תיקייה שהעוזר יעבוד בה")',
+        ];
+    const child = spawn(cmd, args);
+    let out = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.on("error", () => {
+      if (res.headersSent) return;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "dialog-failed" }));
+    });
+    child.on("close", () => {
+      if (res.headersSent) return;
+      const picked = out.trim().replace(/[\\/]+$/, "");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (!picked) {
+        // המשתמש ביטל — לא שגיאה
+        res.end(JSON.stringify({ ok: false, cancelled: true }));
+        return;
+      }
+      // הגנה: שומרים רק תיקייה אמיתית שקיימת. חלון שנכשל/רץ בלי מסך
+      // עלול להחזיר נתיב שגוי — ואסור שזה ידרוס תיקייה טובה שכבר נבחרה.
+      let isDir = false;
+      try {
+        isDir = fs.statSync(picked).isDirectory();
+      } catch {}
+      // חלון שרץ בלי מסך (רקע/headless) מחזיר את תיקיית הבית במקום לבטל.
+      // תיקיית הבית הגולמית היא לא בחירה אמיתית לבוט — מתייחסים אליה כביטול.
+      const home = (process.env.HOME || "").replace(/[\\/]+$/, "");
+      if (!isDir || picked === home) {
+        console.log(
+          `[workdir] rejected (${isDir ? "home-fallback" : "not a directory"}): ${picked}`,
+        );
+        res.end(
+          JSON.stringify({
+            ok: false,
+            cancelled: picked === home,
+            error: isDir ? "home-fallback" : "not-a-directory",
+          }),
+        );
+        return;
+      }
+      config.workdir = picked;
+      saveConfig(config);
+      console.log(`[workdir] set to: ${picked}`);
+      res.end(JSON.stringify({ ok: true, workdir: picked }));
+    });
+    return;
+  }
+
+  // POST /new-folder — יוצר תיקייה חדשה על שולחן העבודה ובוחר אותה (להדגמה ולמי שלא מוצא בחלון)
+  if (req.method === "POST" && url.pathname === "/new-folder") {
+    let body = "";
+    req.on("data", (c) => (body += c.toString()));
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      try {
+        const raw = (JSON.parse(body || "{}").name || "").trim();
+        // שם בטוח: בלי תווי נתיב, עד 60 תווים
+        const name = raw.replace(/[\\/:*?"<>|]/g, "").slice(0, 60);
+        if (!name) {
+          res.end(JSON.stringify({ ok: false, error: "empty-name" }));
+          return;
+        }
+        const desktop = path.join(process.env.HOME || "", "Desktop");
+        const base = fs.existsSync(desktop) ? desktop : process.env.HOME;
+        const dir = path.join(base, name);
+        fs.mkdirSync(dir, { recursive: true });
+        config.workdir = dir;
+        saveConfig(config);
+        console.log(`[workdir] created + set: ${dir}`);
+        res.end(JSON.stringify({ ok: true, workdir: dir }));
+      } catch (e) {
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // GET/POST /brain — קובץ ההנחיות של העוזר (העוזר-שלי.md בתיקיית העבודה)
+  if (url.pathname === "/brain") {
+    const brainPath = path.join(
+      config.workdir || process.env.HOME,
+      "העוזר-שלי.md",
+    );
+    if (req.method === "GET") {
+      let text = "";
+      try {
+        text = fs.readFileSync(brainPath, "utf8");
+      } catch {}
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({ ok: true, text, path: brainPath, exists: !!text }),
+      );
+      return;
+    }
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (c) => (body += c.toString()));
+      req.on("end", () => {
+        try {
+          const { text } = JSON.parse(body);
+          fs.writeFileSync(brainPath, text || "", "utf8");
+          console.log(
+            `[brain] saved (${(text || "").length} chars) → ${brainPath}`,
+          );
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, path: brainPath }));
+        } catch (e) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: e.message }));
+        }
+      });
+      return;
+    }
   }
 
   res.writeHead(404);
