@@ -756,7 +756,11 @@
                   margin-top: 12px;
                 "
               >
-                <button class="btn btn-ghost" id="green-check-btn" type="button">
+                <button
+                  class="btn btn-ghost"
+                  id="green-check-btn"
+                  type="button"
+                >
                   🔍 בדיקת פרטים
                 </button>
                 <button
@@ -888,6 +892,21 @@
     </div>
 
     <script>
+      // ----- 🛡️ אבטחה: כל בקשה מהמסך נושאת את המפתח שהעוזר הזריק לדף -----
+      // אתר זר לא יכול לקרוא את הדף שלנו → לא מכיר את המפתח → העוזר דוחה אותו.
+      (function () {
+        const meta = document.querySelector('meta[name="app-nonce"]');
+        const nonce = meta ? meta.getAttribute("content") : "";
+        const realFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+          init = init || {};
+          const headers = new Headers(init.headers || {});
+          if (nonce) headers.set("X-App-Nonce", nonce);
+          init.headers = headers;
+          return realFetch(input, init);
+        };
+      })();
+
       // ----- טאבים: ראשי / שיחות / הגדרות -----
       function showTab(name) {
         document.querySelectorAll(".tab").forEach((t) => {
@@ -960,7 +979,9 @@
         <div class="big-check">🎉</div>
         <h2 style="font-size:22px; font-weight:600;">העוזר שלך מחובר!</h2>
         <div class="me">מחובר כ-<strong>${s.meName || "הוואטסאפ שלך"}</strong> · ${phone}${
-          s.config && s.config.provider === "green-api" ? " · דרך Green API 🟩" : ""
+          s.config && s.config.provider === "green-api"
+            ? " · דרך Green API 🟩"
+            : ""
         }</div>
         ${
           s.greenWebhookConflict
@@ -1013,7 +1034,7 @@
         <h2 style="font-size:20px; font-weight:600;">חיבור דרך Green API — חסרים פרטים</h2>
         <p style="color:var(--smoke); margin:8px 0 14px; line-height:1.6;">${
           (s && s.lastError) ||
-          "מזינים Instance ID ו-API Token בהגדרות ולוחצים \"חיבור דרך Green API\". אחרי זה ה-QR יופיע כאן."
+          'מזינים Instance ID ו-API Token בהגדרות ולוחצים "חיבור דרך Green API". אחרי זה ה-QR יופיע כאן.'
         }</p>
         <button class="btn btn-primary" id="goto-green-btn">⚙️ להגדרות החיבור</button>`;
         document.getElementById("goto-green-btn").onclick = () => {
@@ -1139,7 +1160,8 @@
           }
           // חזרה לכרום — אם Green API הוא מה ששמור, זה מעבר אמיתי שמפעיל מחדש
           if (savedProvider === "green-api") {
-            if (!confirm("לחזור לחיבור דרך כרום (QR מקומי)? העוזר יופעל מחדש.")) return;
+            if (!confirm("לחזור לחיבור דרך כרום (QR מקומי)? העוזר יופעל מחדש."))
+              return;
             await switchProvider({ provider: "baileys" });
             return;
           }
@@ -1179,7 +1201,9 @@
           renderReconnecting("העוזר מופעל מחדש עם דרך החיבור החדשה...");
           const back = await waitForRestart();
           if (!back) {
-            renderError("העוזר לא חזר לעלות. אם הפעלתם אותו ידנית — להפעיל שוב (לחיצה כפולה על הבוט שלי.command).");
+            renderError(
+              "העוזר לא חזר לעלות. אם הפעלתם אותו ידנית — להפעיל שוב (לחיצה כפולה על הבוט שלי.command).",
+            );
             return;
           }
         }

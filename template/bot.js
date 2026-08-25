@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import qrcode from "qrcode";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +30,19 @@ const SESSIONS_PATH = path.join(__dirname, "sessions.json");
 const FEED_PATH = path.join(__dirname, "feed.json");
 const AUTH_DIR = path.join(__dirname, "auth");
 const PORT = 7655;
+
+// ----- אבטחה: רק המסך של העוזר עצמו יכול לשנות אותו -----
+// העוזר רץ על המחשב ומקבל פקודות מהדפדפן. בלי הגנה, כל אתר שפתוח בדפדפן
+// יכול לשלוח לו POST (למשל "תתחבר ל-Green API של התוקף") — והוואטסאפ של
+// התוקף היה שולט במחשב. הפתרון: מפתח חד-פעמי (nonce) שנוצר בכל הפעלה,
+// מוזרק רק לתוך הדף שהעוזר מגיש, וכל בקשת שינוי חייבת לשאת אותו.
+// אתר זר לא יכול לקרוא את הדף שלנו (same-origin) → לא יכול להשיג את המפתח.
+const APP_NONCE = randomBytes(24).toString("hex");
+function hasValidNonce(req) {
+  const got = String(req.headers["x-app-nonce"] || "");
+  if (got.length !== APP_NONCE.length) return false;
+  return timingSafeEqual(Buffer.from(got), Buffer.from(APP_NONCE));
+}
 
 // ----- סודות: קובץ .env בלבד (לא config.json) -----
 // launchd לא טוען .env לבד, אז המנוע קורא אותו בעצמו בעלייה.
@@ -1103,10 +1117,31 @@ async function handleMessage(msg) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
+  // 🛡️ שער אחד לכל בקשת שינוי: בלי המפתח של הדף שלנו — נדחה.
+  // מכסה את כל ה-POST (config, reset, pick-folder, new-folder, brain, resend, green/*)
+  // וגם כל endpoint שיתווסף בעתיד — בלי צורך לזכור לגדר כל אחד בנפרד.
+  if (req.method !== "GET" && !hasValidNonce(req)) {
+    console.log(
+      `[BLOCKED] 🚨 ${req.method} ${url.pathname} בלי מפתח — נדחה (בקשה שלא מהמסך שלנו)`,
+    );
+    state.stats.errors++;
+    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+    return;
+  }
+
   // GET / — index.html
   if (req.method === "GET" && url.pathname === "/") {
-    const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    let html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+    // המפתח מוזרק רק לדף הזה. אתר זר לא יכול לקרוא אותו → לא יכול לזייף בקשות.
+    html = html.replace(
+      "<head>",
+      `<head>\n    <meta name="app-nonce" content="${APP_NONCE}" />`,
+    );
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
     res.end(html);
     return;
   }
@@ -1486,8 +1521,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[ui] http://127.0.0.1:${PORT}`);
-  // פתח דפדפן ברקע — Chrome אם קיים, אחרת ברירת מחדל
+  // פתח דפדפן — רק בהפעלה הראשונה. כל ריסטארט (החלפת ספק, קריסה) לא פותח עוד טאב.
   const url = `http://127.0.0.1:${PORT}`;
+  const OPENED_MARK = path.join(__dirname, ".opened");
+  if (process.env.BROWSER === "false" || fs.existsSync(OPENED_MARK)) return;
+  try {
+    fs.writeFileSync(OPENED_MARK, String(Date.now()));
+  } catch {}
   try {
     const tryChrome = spawn("open", ["-a", "Google Chrome", url], {
       detached: true,
