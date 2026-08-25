@@ -551,6 +551,10 @@ async function greenCall(
     );
   }
   const text = await r.text();
+  // Green API מחזיר 408 על receiveNotification כשאין הודעות חדשות — זה תקין ומתועד, לא שגיאה.
+  // בלי זה: כל בדיקה ריקה נספרת ככשל → האטה מצטברת עד 30 שניות בין בדיקות → במספר שקט
+  // (בדיוק מה שמומלץ לתלמידים) העוזר "לא עונה". רק ל-polling — ב-sendMessage 408 הוא כשל אמיתי.
+  if (r.status === 408 && method === "receiveNotification") return null;
   if (!r.ok)
     throw new Error(`${method} → HTTP ${r.status}: ${text.slice(0, 160)}`);
   if (!text) return null;
