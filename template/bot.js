@@ -30,6 +30,39 @@ const FEED_PATH = path.join(__dirname, "feed.json");
 const AUTH_DIR = path.join(__dirname, "auth");
 const PORT = 7655;
 
+// ----- סודות: קובץ .env בלבד (לא config.json) -----
+// launchd לא טוען .env לבד, אז המנוע קורא אותו בעצמו בעלייה.
+// הטוקן של Green API חי רק כאן — לא ב-config.json, לא ב-/state, לא בלוג.
+const ENV_PATH = path.join(__dirname, ".env");
+function loadDotEnv() {
+  try {
+    const text = fs.readFileSync(ENV_PATH, "utf8");
+    for (const line of text.split("\n")) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+    }
+  } catch {}
+}
+loadDotEnv();
+// כתיבה/עדכון של מפתח ב-.env, עם הרשאות 600 (רק המשתמש קורא)
+function setDotEnv(key, value) {
+  let lines = [];
+  try {
+    lines = fs.readFileSync(ENV_PATH, "utf8").split("\n");
+  } catch {}
+  const re = new RegExp(`^\\s*${key}\\s*=`);
+  lines = lines.filter((l) => !re.test(l) && l.trim() !== "");
+  if (value) lines.push(`${key}=${value}`);
+  fs.writeFileSync(ENV_PATH, lines.join("\n") + (lines.length ? "\n" : ""), {
+    mode: 0o600,
+  });
+  try {
+    fs.chmodSync(ENV_PATH, 0o600);
+  } catch {}
+  if (value) process.env[key] = value;
+  else delete process.env[key];
+}
+
 // וודא שתיקיית auth קיימת — Baileys צריך אותה לפני הראשון
 if (!fs.existsSync(AUTH_DIR)) {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -115,7 +148,10 @@ function defaultConfig() {
     workdir: process.env.HOME,
     model: "sonnet",
     mode: "personal",
-    provider: "baileys", // TODO: support "green-api" in future
+    provider: "baileys", // "baileys" (כרום — QR מקומי) | "green-api"
+    // Green API — מוזן מהמסך ונשמר רק במחשב הזה. fallback: GREEN_API_INSTANCE_ID / GREEN_API_TOKEN מהסביבה
+    // Green API: רק המזהה (לא סודי). הטוקן חי אך ורק ב-.env — אף פעם לא כאן.
+    greenApi: { instanceId: "" },
     // זהות ותפקיד — נכתב מהמסך, מרכיב את המוח יחד עם ה-systemPrompt
     botRole: "",
     botTone: "",
@@ -181,6 +217,8 @@ const state = {
   meName: null,
   stats: { messagesIn: 0, messagesOut: 0, errors: 0 },
   lastError: null,
+  greenLastPoll: null, // Green API — מתי נמשכו הודעות לאחרונה
+  greenWebhookConflict: false, // Green API — מוגדר webhookUrl שגוזל את ההודעות מהבוט
 };
 
 // IDs של הודעות שאני בעצמי שלחתי — כדי לזהות echo ולא ליפול ללופ
@@ -231,7 +269,7 @@ async function sendBotMessage(jid, text) {
     }
     // סימן ויזואלי קבוע — מבדיל את התשובות של הבוט מההודעות שהמשתמש כתב לעצמו ב-self-chat
     const message = text.startsWith("🤖") ? text : `🤖 ${text}`;
-    const sent = await sock.sendMessage(jid, { text: message });
+    const sent = await providerSend(jid, message);
     rememberSentId(sent?.key?.id);
     return sent;
   } catch (e) {
@@ -400,7 +438,393 @@ function applyModelSwitch(text) {
 // ----- WhatsApp socket -----
 let sock;
 
+// ----- Provider abstraction (כרום/Baileys או Green API) -----
+function isGreen() {
+  return (config.provider || "baileys") === "green-api";
+}
+
+// שליחה דרך הספק הפעיל. מחזיר אובייקט עם key.id כדי שזיהוי ה-echo יעבוד בשני הספקים.
+async function providerSend(jid, text) {
+  if (isGreen()) {
+    const r = await greenCall("sendMessage", {
+      verb: "POST",
+      body: { chatId: greenChatId(jid), message: text },
+      timeoutMs: 30000,
+    });
+    return { key: { id: r?.idMessage || null } };
+  }
+  if (!sock) throw new Error("WhatsApp socket not ready");
+  return sock.sendMessage(jid, { text });
+}
+
+// "מקליד..." — רק בכרום. ב-Green API אין את זה, ומתעלמים בשקט.
+async function presence(jid, kind) {
+  if (isGreen() || !sock) return;
+  try {
+    await sock.sendPresenceUpdate(kind, jid);
+  } catch {}
+}
+
+// הפעלה מחדש של התהליך. קוד יציאה 1 בכוונה: launchd מוגדר להרים מחדש רק
+// אחרי יציאה לא-תקינה (SuccessfulExit=false) — יציאה עם 0 הייתה משאירה את הבוט מת.
+function restartProcess(reason) {
+  console.log(`[restart] ${reason} — יוצא (קוד 1) כדי שהשירות ירים מחדש`);
+  setTimeout(() => process.exit(1), 600);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ----- Green API provider -----
+// חיבור דרך Green API: יציב יותר מכרום, לא תלוי בדפדפן. הבוט מושך הודעות ב-polling
+// (receiveNotification) — בלי שרת ובלי כתובת ציבורית. ה-QR מגיע מ-Green API ומוצג באותו מסך.
+function greenCreds() {
+  // ה-instanceId (לא סודי) ב-config; הטוקן (סודי) רק ב-.env דרך process.env.
+  const g = config.greenApi || {};
+  const instanceId = String(
+    g.instanceId || process.env.GREEN_API_INSTANCE_ID || "",
+  ).replace(/\D/g, "");
+  const token = String(process.env.GREEN_API_TOKEN || "").trim();
+  const source = instanceId && token ? "env" : "none";
+  return { instanceId, token, source };
+}
+
+// מה שמותר להראות למסך — בלי ה-token
+function greenPublicInfo() {
+  const c = greenCreds();
+  return { instanceId: c.instanceId, hasToken: !!c.token, source: c.source };
+}
+
+// Green API מפנה כל instance לשרת לפי 4 הספרות הראשונות (למשל 7105 → 7105.api.greenapi.com)
+function greenBaseUrl(creds) {
+  const prefix = creds.instanceId.slice(0, 4);
+  const host =
+    prefix.length === 4
+      ? `https://${prefix}.api.greenapi.com`
+      : "https://api.green-api.com";
+  return `${host}/waInstance${creds.instanceId}`;
+}
+
+async function greenCall(
+  method,
+  {
+    verb = "GET",
+    body,
+    query = "",
+    extraPath = "",
+    timeoutMs = 15000,
+    creds,
+  } = {},
+) {
+  const c = creds || greenCreds();
+  if (!c.instanceId || !c.token)
+    throw new Error("missing Green API credentials");
+  const opts = {
+    method: verb,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+  const tail = `/${method}/${c.token}${extraPath}${query}`;
+  let r;
+  try {
+    r = await fetch(`${greenBaseUrl(c)}${tail}`, opts);
+  } catch (e) {
+    // Instance ID עם קידומת לא קיימת → הכתובת הייעודית לא נפתרת ב-DNS. מנסים את הכתובת הכללית,
+    // שמחזירה תשובה מסודרת (למשל 401/403) במקום "אין תקשורת" מטעה.
+    r = await fetch(
+      `https://api.green-api.com/waInstance${c.instanceId}${tail}`,
+      opts,
+    );
+  }
+  const text = await r.text();
+  if (!r.ok)
+    throw new Error(`${method} → HTTP ${r.status}: ${text.slice(0, 160)}`);
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function greenErrorHe(msg) {
+  const m = String(msg || "");
+  if (/expired/i.test(m))
+    return "ה-instance ב-Green API פג תוקף. מחדשים אותו בקונסול (console.green-api.com) והעוזר יתחבר לבד.";
+  if (/HTTP 401|HTTP 403|unauthorized|forbidden/i.test(m))
+    return "Green API דחה את הפרטים — בודקים Instance ID ו-API Token בהגדרות.";
+  if (/HTTP 404/i.test(m))
+    return "Instance ID לא נמצא ב-Green API — בודקים את המספר בהגדרות.";
+  if (/HTTP 429/i.test(m))
+    return "Green API מגביל קצב כרגע (429). העוזר ינסה שוב בעוד רגע.";
+  if (/abort|timeout|fetch failed|ENOTFOUND|ECONN/i.test(m))
+    return "אין תקשורת עם Green API — בודקים חיבור לאינטרנט. העוזר ינסה שוב.";
+  return `שגיאת Green API: ${m.slice(0, 160)}`;
+}
+
+const GREEN_STATE_HE = {
+  authorized: "מחובר לוואטסאפ",
+  notAuthorized: "מחכה לסריקת QR",
+  blocked: "חסום",
+  starting: "מתחיל",
+  yellowCard: "מוגבל זמנית (yellowCard)",
+  sleepMode: "במצב שינה",
+};
+
+function greenChatId(jid) {
+  return String(jid || "").replace("@s.whatsapp.net", "@c.us");
+}
+
+let greenGeneration = 0; // כל הפעלה מחדש מקדמת את המונה — לולאות ישנות מפסיקות לבד
+
+function greenRestart(delayMs = 1500) {
+  greenGeneration++;
+  setTimeout(() => startGreenApi(), delayMs);
+}
+
+// מוודא שההודעות מגיעות לבוט: נכנסות + יוצאות מהטלפון (self-chat), בלי echo של מה שהבוט עצמו שולח.
+// ב-webhookUrl לא נוגעים אוטומטית — אם מוגדר, ההודעות הולכות לשם ולא לבוט, ומדווחים על זה במסך.
+async function greenEnsureSettings() {
+  let s = null;
+  try {
+    s = await greenCall("getSettings");
+  } catch (e) {
+    console.log("[green] getSettings failed:", e.message);
+    return;
+  }
+  state.greenWebhookConflict = !!(s?.webhookUrl && String(s.webhookUrl).trim());
+  if (state.greenWebhookConflict) {
+    console.log(
+      `[green] ⚠️ webhookUrl מוגדר ב-instance (${s.webhookUrl}) — ההודעות לא יגיעו לעוזר עד שינוקה`,
+    );
+  }
+  const want = {
+    incomingWebhook: "yes",
+    outgoingMessageWebhook: "yes",
+    outgoingAPIMessageWebhook: "no",
+    stateWebhook: "yes",
+  };
+  const patch = {};
+  for (const [k, v] of Object.entries(want)) {
+    if (s?.[k] !== v) patch[k] = v;
+  }
+  if (Object.keys(patch).length) {
+    try {
+      await greenCall("setSettings", { verb: "POST", body: patch });
+      console.log("[green] settings updated:", JSON.stringify(patch));
+    } catch (e) {
+      console.log("[green] setSettings failed:", e.message);
+    }
+  }
+}
+
+async function startGreenApi() {
+  const gen = ++greenGeneration;
+  const creds = greenCreds();
+  state.qr = null;
+  state.meLid = null;
+  if (!creds.instanceId || !creds.token) {
+    state.status = "green-setup";
+    state.lastError =
+      "חסרים Instance ID ו-API Token של Green API — מזינים אותם בהגדרות ← איך העוזר מחובר.";
+    console.log("[green] no credentials — waiting for setup");
+    return;
+  }
+  console.log(
+    `[green] starting (instance ${creds.instanceId}, credentials from ${creds.source})`,
+  );
+  state.status = "connecting";
+  state.lastError = null;
+
+  // 1) מחכים לאישור (סריקת QR)
+  while (gen === greenGeneration) {
+    let st;
+    try {
+      st = await greenCall("getStateInstance");
+    } catch (e) {
+      state.status = "error";
+      state.lastError = greenErrorHe(e.message);
+      state.stats.errors++;
+      console.log("[green] state error:", e.message);
+      await sleep(15000);
+      continue;
+    }
+    const s = st?.stateInstance;
+    if (s === "authorized") break;
+    if (s === "notAuthorized") {
+      try {
+        const q = await greenCall("qr");
+        if (q?.type === "qrCode" && q.message) {
+          state.qr = `data:image/png;base64,${q.message}`;
+          state.status = "qr";
+          state.lastError = null;
+        } else if (q?.type !== "alreadyLogged") {
+          state.status = "connecting";
+          state.lastError = q?.message ? `Green API: ${q.message}` : null;
+        }
+      } catch (e) {
+        state.lastError = greenErrorHe(e.message);
+      }
+      await sleep(3500);
+      continue;
+    }
+    // starting / yellowCard / blocked / sleepMode
+    state.status = s === "blocked" ? "error" : "connecting";
+    state.lastError =
+      s === "blocked"
+        ? "החשבון חסום ב-Green API (blocked) — בודקים בקונסול."
+        : `Green API במצב "${GREEN_STATE_HE[s] || s || "לא ידוע"}" — ממתין...`;
+    await sleep(5000);
+  }
+  if (gen !== greenGeneration) return;
+
+  // 2) מחובר — מזהים את המספר שלנו (בשביל self-chat ו-lockdown)
+  let phone = "";
+  try {
+    const wa = await greenCall("getWaSettings");
+    phone = String(wa?.phone || "").replace(/\D/g, "");
+    state.meName = wa?.name || "";
+  } catch (e) {
+    console.log("[green] getWaSettings failed:", e.message);
+  }
+  if (!phone)
+    phone = String(process.env.GREEN_API_MY_PHONE || "").replace(/\D/g, "");
+  state.meJid = phone ? `${phone}@c.us` : null;
+  state.qr = null;
+  state.status = "connected";
+  state.lastError = null;
+  state.greenLastPoll = Date.now();
+  if (state.meJid) ensureSelfWhitelisted();
+  console.log(
+    `[green] connected as ${state.meJid || "(המספר יזוהה בהודעה הראשונה)"}`,
+  );
+  if (config.lockdownMode !== false) {
+    console.log(
+      `🔒 LOCKDOWN פעיל — רק ${jidUser(state.meJid) || "המספר של ה-instance"} יכול להשתמש בעוזר.`,
+    );
+  }
+  await greenEnsureSettings();
+
+  // הודעת ברכה אוטומטית בחיבור הראשון (כמו בכרום)
+  if (!config.welcomeSent && config.welcomeMessage && state.meJid) {
+    setTimeout(async () => {
+      if (gen !== greenGeneration) return;
+      const sent = await sendBotMessage(state.meJid, config.welcomeMessage);
+      if (sent) {
+        config.welcomeSent = true;
+        saveConfig(config);
+        state.stats.messagesOut++;
+        pushFeed({
+          dir: "out",
+          to: jidUser(state.meJid),
+          text: config.welcomeMessage,
+        });
+        console.log(`[welcome] sent to ${state.meJid}`);
+      }
+    }, 3000);
+  }
+
+  greenPollLoop(gen);
+}
+
+async function greenPollLoop(gen) {
+  let errs = 0;
+  while (gen === greenGeneration) {
+    try {
+      const n = await greenCall("receiveNotification", {
+        query: "?receiveTimeout=20",
+        timeoutMs: 40000,
+      });
+      state.greenLastPoll = Date.now();
+      errs = 0;
+      if (state.status === "reconnecting" || state.status === "error") {
+        state.status = "connected";
+        state.lastError = null;
+      }
+      if (!n || n.receiptId == null) continue;
+      try {
+        await handleGreenNotification(n.body || {});
+      } catch (e) {
+        console.error("[green/handler]", e);
+        state.stats.errors++;
+        state.lastError = e.message;
+      }
+      try {
+        await greenCall("deleteNotification", {
+          verb: "DELETE",
+          extraPath: `/${n.receiptId}`,
+          timeoutMs: 10000,
+        });
+      } catch (e) {
+        console.log("[green] deleteNotification failed:", e.message);
+      }
+    } catch (e) {
+      errs++;
+      const msg = e.message || "";
+      console.log(`[green] poll error #${errs}: ${msg}`);
+      state.lastError = greenErrorHe(msg);
+      if (/expired|HTTP 401|HTTP 403|HTTP 404/i.test(msg)) {
+        state.status = "error";
+        state.stats.errors++;
+      } else if (errs >= 3) {
+        state.status = "reconnecting";
+      }
+      await sleep(Math.min(30000, 2000 * errs));
+      // אחרי כמה כשלונות רצופים — בודקים מחדש את מצב ה-instance (אולי נותק וצריך QR חדש)
+      if (errs % 5 === 0 && gen === greenGeneration) {
+        greenRestart(0);
+        return;
+      }
+    }
+  }
+}
+
+// מתרגם הודעה של Green API למבנה שה-handleMessage המשותף מכיר (אותה לוגיקה: self-chat, lockdown, echo)
+async function handleGreenNotification(body) {
+  const type = body.typeWebhook;
+  if (type === "stateInstanceChanged") {
+    console.log(`[green] state changed → ${body.stateInstance}`);
+    if (body.stateInstance && body.stateInstance !== "authorized") {
+      state.status = "reconnecting";
+      state.lastError = "החיבור לוואטסאפ נותק ב-Green API — מכין QR חדש";
+      greenRestart(1000);
+    }
+    return;
+  }
+  if (type !== "incomingMessageReceived" && type !== "outgoingMessageReceived")
+    return;
+  const wid = body.instanceData?.wid;
+  if (!state.meJid && wid) {
+    state.meJid = wid;
+    ensureSelfWhitelisted();
+    console.log(`[green] me = ${wid}`);
+  }
+  const md = body.messageData || {};
+  const text =
+    md.textMessageData?.textMessage ||
+    md.extendedTextMessageData?.text ||
+    md.fileMessageData?.caption ||
+    "";
+  const chatId = body.senderData?.chatId || "";
+  if (!chatId) return;
+  await handleMessage({
+    key: {
+      id: body.idMessage,
+      fromMe: type === "outgoingMessageReceived",
+      remoteJid: chatId,
+    },
+    message: { conversation: text },
+  });
+}
+
+// ----- Boot dispatcher -----
 async function startBot() {
+  if (isGreen()) return startGreenApi();
+  return startBaileys();
+}
+
+// ----- WhatsApp socket (כרום / Baileys) -----
+async function startBaileys() {
   const { state: authState, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
@@ -661,16 +1085,12 @@ async function handleMessage(msg) {
 - לא לרשום כלים שאין לך באמת (תבדוק את ה-tools שלך לפני)`;
   }
 
-  // typing indicator
-  try {
-    await sock.sendPresenceUpdate("composing", remoteJid);
-  } catch {}
+  // typing indicator (בכרום בלבד)
+  await presence(remoteJid, "composing");
 
   const reply = await askClaude(remoteJid, textToSend);
 
-  try {
-    await sock.sendPresenceUpdate("paused", remoteJid);
-  } catch {}
+  await presence(remoteJid, "paused");
 
   if (reply.text) {
     await sendBotMessage(remoteJid, reply.text);
@@ -701,6 +1121,7 @@ const server = http.createServer(async (req, res) => {
         model: config.model,
         mode: config.mode,
         provider: config.provider || "baileys",
+        greenApi: greenPublicInfo(),
         lockdownMode: config.lockdownMode !== false,
         whitelist: config.whitelist,
         systemPromptAppend: config.systemPromptAppend,
@@ -760,8 +1181,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const targetJid = state.meLid || state.meJid;
-    sock
-      .sendMessage(targetJid, { text: config.welcomeMessage })
+    providerSend(targetJid, config.welcomeMessage)
       .then(() => {
         config.welcomeSent = true;
         saveConfig(config);
@@ -800,6 +1220,36 @@ const server = http.createServer(async (req, res) => {
             delete next.lockdownMode;
           }
         }
+        // Green API — פרטי חיבור. token ריק = לא לגעת בקיים (המסך לא מציג אותו)
+        let needsRestart = false;
+        if (next.greenApi && typeof next.greenApi === "object") {
+          // אבטחה: הטוקן לעולם לא נכנס ל-config.json. נכתב ל-.env (הרשאות 600) בלבד.
+          const cur = config.greenApi || { instanceId: "" };
+          const instanceId = String(
+            next.greenApi.instanceId ?? cur.instanceId ?? "",
+          ).replace(/\D/g, "");
+          const newToken = String(next.greenApi.token || "").trim();
+          const curToken = String(process.env.GREEN_API_TOKEN || "").trim();
+          if (!instanceId) {
+            // בלי instance — מנקים גם את הטוקן מ-.env
+            if (curToken) {
+              setDotEnv("GREEN_API_TOKEN", "");
+              needsRestart = true;
+            }
+          } else if (newToken && newToken !== curToken) {
+            setDotEnv("GREEN_API_TOKEN", newToken);
+            needsRestart = true;
+          }
+          if (instanceId !== (cur.instanceId || "")) needsRestart = true;
+          next.greenApi = { instanceId }; // רק המזהה הלא-סודי נשמר ב-config
+        }
+        if (
+          next.provider !== undefined &&
+          !["baileys", "green-api"].includes(next.provider)
+        )
+          delete next.provider;
+        if (next.provider && next.provider !== (config.provider || "baileys"))
+          needsRestart = true;
         config = { ...config, ...next };
         // safeguard: לוודא שהמספר של עצמו נשאר ב-whitelist (גם ב-lockdown — לתאימות)
         if (state.meJid) {
@@ -808,7 +1258,8 @@ const server = http.createServer(async (req, res) => {
         }
         saveConfig(config);
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, config }));
+        res.end(JSON.stringify({ ok: true, restart: needsRestart }));
+        if (needsRestart) restartProcess("provider/credentials changed");
       } catch (e) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -817,15 +1268,86 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /reset — להתחיל מחדש (מחיקת auth)
+  // POST /green/check — בדיקת פרטי Green API בלי לשמור (מהמסך)
+  if (req.method === "POST" && url.pathname === "/green/check") {
+    let body = "";
+    req.on("data", (c) => (body += c.toString()));
+    req.on("end", async () => {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      try {
+        const p = JSON.parse(body || "{}");
+        const cur = greenCreds();
+        const creds = {
+          instanceId: String(p.instanceId || cur.instanceId || "").replace(
+            /\D/g,
+            "",
+          ),
+          token: String(p.token || "").trim() || cur.token || "",
+        };
+        if (!creds.instanceId || !creds.token) {
+          res.end(
+            JSON.stringify({ ok: false, error: "חסרים Instance ID או Token" }),
+          );
+          return;
+        }
+        const st = await greenCall("getStateInstance", { creds });
+        const s = st?.stateInstance || "unknown";
+        res.end(
+          JSON.stringify({
+            ok: true,
+            stateInstance: s,
+            stateHe: GREEN_STATE_HE[s] || s,
+          }),
+        );
+      } catch (e) {
+        res.end(JSON.stringify({ ok: false, error: greenErrorHe(e.message) }));
+      }
+    });
+    return;
+  }
+
+  // POST /green/use-polling — מנקה webhookUrl ב-instance כדי שההודעות יגיעו לעוזר (פעולה מפורשת מהמסך)
+  if (req.method === "POST" && url.pathname === "/green/use-polling") {
+    greenCall("setSettings", {
+      verb: "POST",
+      body: { webhookUrl: "", webhookUrlToken: "" },
+    })
+      .then(() => {
+        state.greenWebhookConflict = false;
+        console.log(
+          "[green] webhookUrl cleared by user — switching to polling",
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        greenRestart(1000);
+      })
+      .catch((e) => {
+        res.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ ok: false, error: greenErrorHe(e.message) }));
+      });
+    return;
+  }
+
+  // POST /reset — להתחיל מחדש (כרום: מחיקת auth · Green API: logout) ואז הפעלה מחדש של התהליך
   if (req.method === "POST" && url.pathname === "/reset") {
+    const finish = () => {
+      res.writeHead(200);
+      res.end('{"ok":true}');
+      restartProcess("reset from UI");
+    };
+    if (isGreen()) {
+      greenCall("logout")
+        .catch((e) => console.log("[green] logout failed:", e.message))
+        .finally(finish);
+      return;
+    }
     try {
       fs.rmSync(AUTH_DIR, { recursive: true, force: true });
     } catch {}
     fs.mkdirSync(AUTH_DIR, { recursive: true });
-    res.writeHead(200);
-    res.end('{"ok":true}');
-    setTimeout(() => process.exit(0), 500);
+    finish();
     return;
   }
 

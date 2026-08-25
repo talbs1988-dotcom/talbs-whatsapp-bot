@@ -4,3 +4,5 @@ sessions.json
 feed.json
 *.log
 .DS_Store
+.env
+config.json
