@@ -152,6 +152,8 @@ const DEFAULT_SYSTEM_PROMPT = `אתה "{agentName}" — Claude Code המלא, מ
 
 תמליל קולי? — מתחיל ב-"[תמליל קולי]:" — התייחס כטקסט רגיל.
 
+המסך של העוזר (הגדרות, קובץ ההנחיות, תיקייה, חיבור, הודעות קוליות, קבוצות): האייקון "העוזר האישי" על שולחן העבודה, או http://127.0.0.1:7655 בדפדפן. כששואלים איך לשנות משהו בהגדרות — מפנים לשם.
+
 חשוב: התחל כל תשובה שלך באמוג'י רובוט 🤖 ורווח (לדוגמה: "🤖 הוספתי לקלנדר..."). זה הסימן הויזואלי שמבדיל בין מה שאתה עונה לבין מה שנכתב בצ'אט על ידי בעל/ת העסק.`;
 
 const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני {agentName} — טל בשור, עסק שעובד בשבילך.
@@ -760,7 +762,32 @@ async function handleGroupMessage(msg) {
     pushFeed({ dir: "out", to: jidUser(target), text: out });
   }
 }
-// רשימת הקבוצות של המספר המחובר — לבחירה במסך
+// קבוצות שנראו בהודעות (גם לא נבחרות): Green/כרום לא תמיד מחזירים את כל הקבוצות
+// (קבוצה חדשה, קהילה, סנכרון של עד 5 דק'). כל הודעה מקבוצה רושמת אותה כאן → מופיעה בבחירה.
+const GROUPS_SEEN_PATH = path.join(__dirname, "groups-seen.json");
+let groupsSeen = {};
+try {
+  groupsSeen = JSON.parse(fs.readFileSync(GROUPS_SEEN_PATH, "utf8")) || {};
+} catch {}
+function rememberGroup(jid, name) {
+  if (!jid || !String(jid).endsWith("@g.us")) return;
+  const prev = groupsSeen[jid];
+  const nm = String(name || "").trim();
+  if (prev && prev.name === (nm || prev.name) && Date.now() - prev.at < 60000)
+    return; // לא לכתוב לדיסק על כל הודעה
+  groupsSeen[jid] = { name: nm || prev?.name || "", at: Date.now() };
+  const keys = Object.keys(groupsSeen);
+  if (keys.length > 500) {
+    keys
+      .sort((a, b) => groupsSeen[a].at - groupsSeen[b].at)
+      .slice(0, keys.length - 400)
+      .forEach((k) => delete groupsSeen[k]);
+  }
+  try {
+    fs.writeFileSync(GROUPS_SEEN_PATH, JSON.stringify(groupsSeen));
+  } catch {}
+}
+// רשימת הקבוצות של המספר המחובר — לבחירה במסך (מהספק + מה שנראה בהודעות)
 async function listGroups() {
   let groups = [];
   if (isGreen()) {
@@ -775,6 +802,10 @@ async function listGroups() {
       id: String(g.id),
       name: String(g.subject || g.id),
     }));
+  }
+  const ids = new Set(groups.map((g) => g.id));
+  for (const [id, v] of Object.entries(groupsSeen)) {
+    if (!ids.has(id)) groups.push({ id, name: v.name || id, seen: true });
   }
   return groups
     .filter((g) => g.id.endsWith("@g.us"))
@@ -1272,6 +1303,7 @@ async function handleGreenNotification(body) {
     "";
   const chatId = body.senderData?.chatId || "";
   if (!chatId) return;
+  if (chatId.endsWith("@g.us")) rememberGroup(chatId, body.senderData?.chatName);
   // 🎤 הודעה קולית — Green נותן קישור להורדה (ואם לא — מבקשים ב-downloadFile)
   const isAudio = /^(audioMessage|voiceMessage|pttMessage)$/i.test(
     md.typeMessage || "",
@@ -1449,7 +1481,10 @@ async function handleMessage(msg) {
   if (!remoteJid) return;
   if (remoteJid === "status@broadcast") return;
   // 👥 קבוצה — מסלול נפרד: האזנה בלבד (לוג לקובץ), בלי לענות בקבוצה
-  if (remoteJid.endsWith("@g.us")) return handleGroupMessage(msg);
+  if (remoteJid.endsWith("@g.us")) {
+    rememberGroup(remoteJid, msg.chatName || "");
+    return handleGroupMessage(msg);
+  }
 
   const fromMe = !!msg.key.fromMe;
   const meUser = jidUser(state.meJid);

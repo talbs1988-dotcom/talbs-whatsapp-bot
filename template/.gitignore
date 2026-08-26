@@ -3,6 +3,7 @@ auth/
 sessions.json
 feed.json
 green-seen.json
+groups-seen.json
 logs/
 *.log
 .opened

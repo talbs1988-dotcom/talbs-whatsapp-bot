@@ -69,14 +69,14 @@ KEEP="$(mktemp -d)"
 # כל מה ששייך למשתמש ולא לקוד: הגדרות, החיבור (auth), הסודות (.env),
 # זיכרון השיחות (sessions), הודעות שכבר נענו (green-seen), היסטוריה (feed), הלוגים.
 # התקנה חוזרת מעדכנת קוד — לא מוחקת את מה שהתלמיד בנה.
-for f in config.json .env sessions.json green-seen.json feed.json .opened; do
+for f in config.json .env sessions.json green-seen.json groups-seen.json feed.json .opened; do
   [ -f "$BOT_DIR/$f" ] && cp "$BOT_DIR/$f" "$KEEP/" || true
 done
 [ -d "$BOT_DIR/auth" ] && cp -R "$BOT_DIR/auth" "$KEEP/" || true
 [ -d "$BOT_DIR/logs" ] && cp -R "$BOT_DIR/logs" "$KEEP/" || true
 rm -rf "$BOT_DIR"
 mv /tmp/talbs-whatsapp-bot-main/template "$BOT_DIR"
-for f in config.json .env sessions.json green-seen.json feed.json .opened; do
+for f in config.json .env sessions.json green-seen.json groups-seen.json feed.json .opened; do
   [ -f "$KEEP/$f" ] && cp "$KEEP/$f" "$BOT_DIR/$f" || true
 done
 [ -f "$BOT_DIR/.env" ] && chmod 600 "$BOT_DIR/.env" || true
@@ -154,6 +154,24 @@ EOF
 
 launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
 
+# ---------- 3b) אייקון "העוזר האישי" על שולחן העבודה וב-Applications ----------
+# תלמיד לא-טכני לא זוכר כתובת. לחיצה על האייקון: מוודאת שהשירות רץ, ופותחת את המסך.
+make_launcher() {
+  local APP="$1"
+  rm -rf "$APP"
+  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; open http://127.0.0.1:7655"' 2>/dev/null || return 1
+  if [ -f "$BOT_DIR/app-icon.icns" ]; then
+    cp "$BOT_DIR/app-icon.icns" "$APP/Contents/Resources/applet.icns" 2>/dev/null || true
+    touch "$APP"
+  fi
+  return 0
+}
+LAUNCHER_OK=""
+if make_launcher "$HOME/Desktop/העוזר האישי.app"; then
+  LAUNCHER_OK=1
+  make_launcher "$HOME/Applications/העוזר האישי.app" 2>/dev/null || { mkdir -p "$HOME/Applications" && make_launcher "$HOME/Applications/העוזר האישי.app" || true; }
+fi
+
 # ---------- 4) אימות אמיתי: המסך שמוגש הוא בדיוק הגרסה שירדה עכשיו ----------
 # לא "הפורט תפוס" (זה יכול להיות תהליך ישן). משווים את מזהה הגרסה שבקובץ שירד
 # למזהה שבדף שהשרת מגיש בפועל. שונה = גרסה ישנה עדיין רצה = לא מצליח.
@@ -173,6 +191,7 @@ if [ -n "$OK" ]; then
   echo "✅ העוזר האישי מותקן ופועל — הגרסה העדכנית ($(echo "$BUILD" | sed 's/.*content="//; s/"$//'))."
   echo "✅ הוא יעלה אוטומטית גם אחרי הפעלה מחדש של המחשב."
   echo "✅ אם יקרוס — יחזור לבד תוך 10 שניות."
+  [ -n "$LAUNCHER_OK" ] && echo "✅ אייקון 'העוזר האישי' נוצר על שולחן העבודה — לחיצה עליו פותחת את המסך בכל רגע." || echo "ℹ️ המסך תמיד ב-http://127.0.0.1:7655"
   [ -z "$CLAUDE_BIN" ] && echo "⚠️ תזכורת: Claude Code לא נמצא — מתקינים ומתחברים, ואז לוחצים 'בדוק ש-Claude עונה' בהגדרות."
   echo ""
   echo "🌐 הדפדפן נפתח — שם מחברים את הוואטסאפ."

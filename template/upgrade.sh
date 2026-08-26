@@ -11,7 +11,7 @@ LOG_DIR="$BOT_DIR/logs"
 LOG="$LOG_DIR/assistant.log"
 UID_="$(id -u)"
 RAW="https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/main/template"
-FILES="bot.js index.html package.json start.command run.sh"
+FILES="bot.js index.html package.json start.command run.sh app-icon.icns"
 
 if [ ! -d "$BOT_DIR" ]; then
   echo "⚠️ העוזר לא מותקן עדיין. מריצים את פקודת ההתקנה מהפורטל."
@@ -123,6 +123,22 @@ $CLAUDE_ENV
 EOF
 
 launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
+
+# אייקון "העוזר האישי" על שולחן העבודה וב-Applications (גם למי שהתקין לפני שהיה)
+make_launcher() {
+  local APP="$1"
+  rm -rf "$APP"
+  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; open http://127.0.0.1:7655"' 2>/dev/null || return 1
+  if [ -f "$BOT_DIR/app-icon.icns" ]; then
+    cp "$BOT_DIR/app-icon.icns" "$APP/Contents/Resources/applet.icns" 2>/dev/null || true
+    touch "$APP"
+  fi
+  return 0
+}
+if make_launcher "$HOME/Desktop/העוזר האישי.app"; then
+  mkdir -p "$HOME/Applications"
+  make_launcher "$HOME/Applications/העוזר האישי.app" || true
+fi
 
 # ---------- 5) אימות אמיתי: הדף המוגש נושא בדיוק את מזהה הגרסה שירדה ----------
 OK=""

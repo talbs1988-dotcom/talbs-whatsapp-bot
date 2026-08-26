@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="app-build" content="2026.08.26-1" />
+    <meta name="app-build" content="2026.08.26-2" />
     <title>העוזר האישי שלי · טל בשור</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -946,6 +946,20 @@
             />
             <div id="groups-list" class="groups-list"></div>
             <small
+              style="
+                color: var(--smoke);
+                font-size: 12px;
+                display: block;
+                margin-top: 8px;
+                line-height: 1.6;
+              "
+            >
+              לא מוצאים קבוצה ברשימה? זה קורה (קבוצה חדשה, קהילה, או שהחיבור
+              עוד לא סנכרן אותה). שולחים בה הודעה כלשהי (או מחכים שמישהו יכתוב
+              שם), לוחצים שוב "טען את רשימת הקבוצות" — והיא תופיע, מסומנת
+              "נראתה בהודעה".
+            </small>
+            <small
               id="groups-count"
               style="
                 color: var(--smoke);
@@ -1172,6 +1186,10 @@
           <h3 style="color:#1f7a3f;">🔒 העוזר מדבר רק עם המספר הזה</h3>
           <p>רק <strong>${phone}</strong> — הטלפון שסרק את ה-QR — יכול לדבר עם העוזר. כל מספר אחר שישלח הודעה ייחסם אוטומטית. זו הגנה מובנית, ואי אפשר לכבות אותה מהמסך.</p>
           <p style="margin-top:6px; font-size:12px; color:var(--smoke);">להחליף טלפון? לחצו "התחבר מחדש" וסרקו מהטלפון החדש.</p>
+        </div>
+        <div class="send-test" style="background:#fffbf1; border:1px solid var(--gold);">
+          <h3>🖥️ איך חוזרים למסך הזה</h3>
+          <p>האייקון <strong>"העוזר האישי"</strong> על שולחן העבודה (ובתיקיית Applications) פותח אותו — גם אחרי הפעלה מחדש של המחשב. או בדפדפן: <code>127.0.0.1:7655</code>. לא צריך שהמסך יהיה פתוח כדי שהעוזר יענה בוואטסאפ — הוא רץ ברקע.</p>
         </div>
         <div class="send-test">
           <h3>🚀 שלחו לעצמכם הודעה לבדיקה</h3>
@@ -1911,6 +1929,7 @@
 
       // ----- 👥 קבוצות -----
       let allGroups = []; // מהוואטסאפ (אחרי "טען")
+      const seenGroups = new Set(); // קבוצות שהעוזר קלט מהודעות (לא מרשימת הספק)
       let selectedGroups = new Map(); // id → name (מה ששמור/נבחר)
       function escHtml(x) {
         return String(x)
@@ -1947,7 +1966,7 @@
         list.innerHTML = rows
           .map(
             (g) =>
-              `<label class="group-row${selectedGroups.has(g.id) ? " checked" : ""}"><input type="checkbox" data-id="${escHtml(g.id)}" ${selectedGroups.has(g.id) ? "checked" : ""}/> <span>${escHtml(g.name)}</span></label>`,
+              `<label class="group-row${selectedGroups.has(g.id) ? " checked" : ""}"><input type="checkbox" data-id="${escHtml(g.id)}" ${selectedGroups.has(g.id) ? "checked" : ""}/> <span>${escHtml(g.name)}</span>${seenGroups.has(g.id) ? '<span class="live-badge" style="margin-right:auto">נראתה בהודעה</span>' : ""}</label>`,
           )
           .join("");
         list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
@@ -1979,6 +1998,8 @@
             ).json();
             if (j.ok) {
               allGroups = j.groups || [];
+              seenGroups.clear();
+              allGroups.forEach((g) => g.seen && seenGroups.add(g.id));
               document.getElementById("groups-search").style.display =
                 allGroups.length > 6 ? "block" : "none";
               st.className = "check-result ok";
