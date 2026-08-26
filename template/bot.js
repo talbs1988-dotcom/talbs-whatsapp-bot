@@ -253,6 +253,9 @@ function defaultConfig() {
     workdir: process.env.HOME,
     // 👥 קבוצות שהעוזר מאזין להן (קריאה בלבד — לעולם לא כותב בקבוצה): [{ id, name }]
     groups: [],
+    // 👤 המספר של בעל/ת העסק כשהעוזר יושב על מספר ייעודי (טלפון שני). נקבע רק בצימוד
+    // עם קוד מהמסך — לא מהמסך ישירות ולא מה-API. ריק = רק הצ'אט-עם-עצמי של המספר המחובר.
+    ownerNumber: "",
     model: "sonnet",
     mode: "personal",
     provider: "baileys", // "baileys" (כרום — QR מקומי) | "green-api"
@@ -326,6 +329,7 @@ const state = {
   lastError: null,
   greenLastPoll: null, // Green API — מתי נמשכו הודעות לאחרונה
   greenWebhookConflict: false, // Green API — מוגדר webhookUrl שגוזל את ההודעות מהבוט
+  pairing: null, // { code, expires } — קוד צימוד פעיל לטלפון האישי
 };
 
 // IDs של הודעות שאני בעצמי שלחתי — כדי לזהות echo ולא ליפול ללופ
@@ -371,7 +375,10 @@ async function sendBotMessage(jid, text) {
       const targetUser = jidUser(jid);
       const meUser = jidUser(state.meJid);
       const meLidUser = state.meLid ? jidUser(state.meLid) : null;
-      const isMe = targetUser === meUser || targetUser === meLidUser;
+      const isMe =
+        targetUser === meUser ||
+        targetUser === meLidUser ||
+        isOwnerUser(targetUser);
       if (!isMe) {
         console.log(
           `[BLOCKED-SEND] 🚨 חסום שליחה ל-${targetUser} — אינו בעל המכשיר (me=${meUser}, lid=${meLidUser})`,
@@ -398,6 +405,22 @@ async function sendBotMessage(jid, text) {
 function jidUser(jid) {
   if (!jid) return "";
   return jid.split("@")[0].split(":")[0];
+}
+// 👤 המספר של בעל/ת העסק (כשהעוזר על מספר ייעודי). ריק = אין.
+function ownerNumber() {
+  return String(config.ownerNumber || "").replace(/\D/g, "");
+}
+function isOwnerUser(user) {
+  const o = ownerNumber();
+  return !!o && !!user && user === o;
+}
+// לאן עונים לבעל/ת העסק: לטלפון האישי אם צומד, אחרת לצ'אט-עם-עצמי
+function ownerTargetJid() {
+  const o = ownerNumber();
+  return o ? `${o}@s.whatsapp.net` : state.meLid || state.meJid;
+}
+function pairingActive() {
+  return !!(state.pairing && Date.now() < state.pairing.expires);
 }
 
 function ensureSelfWhitelisted() {
@@ -853,7 +876,9 @@ async function handleGroupMessage(msg) {
   const text = extractText(msg.message);
   if (!text) return; // קול/מדיה בקבוצות — לא מתמללים (עלות) ולא שומרים
   const fromMe = !!msg.key.fromMe;
-  const who = fromMe
+  const fromOwner =
+    fromMe || isOwnerUser(jidUser(msg.key.participant || ""));
+  const who = fromOwner
     ? "אני"
     : `[${cleanName(msg.pushName || jidUser(msg.key.participant || ""))}]`;
   const tsSec = msgTimestampSec(msg);
@@ -865,11 +890,11 @@ async function handleGroupMessage(msg) {
   }
   state.stats.groupMessages++;
   // רק ההודעות של בעל/ת העסק, ורק כשפונים לעוזר בשם — מפעילות אותו. התשובה בצ'אט הפרטי.
-  if (!fromMe) return;
+  if (!fromOwner) return;
   if (isStale(tsSec, msg.maxAgeMs || DRAIN_MAX_AGE_MS)) return; // ישנה (הצטברה כשהעוזר היה כבוי) — מתועדת, לא מופעלת
   const ask = groupTrigger(text);
   if (!ask) return;
-  const target = state.meLid || state.meJid;
+  const target = ownerTargetJid();
   if (!target) return;
   pushFeed({ dir: "in", from: `👥 ${g.name}`, text, selfChat: true });
   console.log(`[group/${g.name}] בקשה מבעל/ת העסק: ${ask.slice(0, 80)}`);
@@ -1298,15 +1323,19 @@ async function greenPollLoop(gen) {
       errs++;
       console.log(`[green] poll error #${errs}: ${msg}`);
       state.lastError = greenErrorHe(msg);
+      // 5xx = תקלה בשרתים של Green (לא ניתוק): החיבור לוואטסאפ תקין, הודעות נשמרות בתור
+      // אצלם ויגיעו כשיחזרו. לא מציגים "מתחבר מחדש" ולא מפעילים מחדש — רק ממשיכים לנסות.
+      // (המסך שהבהב "מתחבר מחדש" על כל 500 נראה כמו "העוזר מתנתק כל רגע" — והוא לא.)
+      const transient = /HTTP 5\d\d|HTTP 429|abort|timeout|fetch failed|ECONN|ENOTFOUND/i.test(msg);
       if (/expired|HTTP 401|HTTP 403|HTTP 404/i.test(msg)) {
         state.status = "error";
         state.stats.errors++;
-      } else if (errs >= 3) {
+      } else if (!transient && errs >= 3) {
         state.status = "reconnecting";
       }
-      await sleep(Math.min(30000, 2000 * errs));
-      // אחרי כמה כשלונות רצופים — בודקים מחדש את מצב ה-instance (אולי נותק וצריך QR חדש)
-      if (errs % 5 === 0 && gen === greenGeneration) {
+      await sleep(transient ? Math.min(10000, 1500 * errs) : Math.min(30000, 2000 * errs));
+      // אחרי כמה כשלונות רצופים שאינם תקלת-שרת — בודקים מחדש את מצב ה-instance (אולי נותק)
+      if (!transient && errs % 5 === 0 && gen === greenGeneration) {
         greenRestart(0);
         return;
       }
@@ -1684,15 +1713,35 @@ async function handleMessage(msg) {
   // הודעת תשובה של הבוט עצמו (לא self-chat, לא לעבד)
   if (fromMe && !isSelfChat) return;
 
-  // אבטחה: lockdown mode — רק self-chat עובר. שום whitelist, שום יוצא מן הכלל.
+  // 🔗 צימוד הטלפון האישי: הודעה ממספר אחר שמכילה בדיוק את קוד הצימוד הפעיל (מהמסך)
+  // → זה המספר של בעל/ת העסק. הקוד חד-פעמי, 10 דקות, ורק כשלחצו על הכפתור במסך.
+  if (!fromMe && !isSelfChat && pairingActive()) {
+    const typed = extractText(msg.message).replace(/\D/g, "");
+    if (typed && typed === state.pairing.code) {
+      config.ownerNumber = remoteUser;
+      saveConfig(config);
+      state.pairing = null;
+      console.log(`[pair] 👤 המספר של בעל/ת העסק נקבע: ${remoteUser}`);
+      const okText =
+        "✅ מחובר. מעכשיו אני מדבר איתך מהמספר הזה — ורק איתך. מה לעשות?";
+      await sendBotMessage(remoteJid, okText);
+      state.stats.messagesOut++;
+      pushFeed({ dir: "out", to: remoteUser, text: okText });
+      return;
+    }
+  }
+  // בעל/ת העסק = הצ'אט-עם-עצמי של המספר המחובר, או הטלפון האישי שצומד
+  const isOwnerChat = isSelfChat || (!fromMe && isOwnerUser(remoteUser));
+
+  // אבטחה: lockdown mode — רק בעל/ת העסק עובר/ת. שום whitelist, שום יוצא מן הכלל.
   if (config.lockdownMode !== false) {
-    if (!isSelfChat) {
+    if (!isOwnerChat) {
       console.log(
-        `[skip/lockdown] חסום — רק המספר שסרק את ה-QR: ${remoteUser}`,
+        `[skip/lockdown] חסום — רק המספר שחיבר את העוזר${ownerNumber() ? " או הטלפון האישי שצומד" : ""}: ${remoteUser}`,
       );
       return;
     }
-  } else if (!isSelfChat && !config.whitelist.includes(remoteUser)) {
+  } else if (!isOwnerChat && !config.whitelist.includes(remoteUser)) {
     // מצב ישן (lockdown OFF) — whitelist רגיל
     console.log(`[skip] not in whitelist: ${remoteUser}`);
     return;
@@ -1938,6 +1987,12 @@ const server = http.createServer(async (req, res) => {
       // מזהה הפעלה: מתחלף בכל עלייה. המסך משווה — אם השתנה, הוא מרענן את עצמו
       // (אחרת הוא ממשיך עם מפתח ישן וכל לחיצה נכשלת בשקט).
       bootId: APP_NONCE.slice(0, 12),
+      pairing: pairingActive()
+        ? {
+            code: state.pairing.code,
+            expiresIn: Math.max(0, Math.round((state.pairing.expires - Date.now()) / 1000)),
+          }
+        : null,
       config: {
         agentName: config.agentName,
         workdir: config.workdir,
@@ -1956,6 +2011,7 @@ const server = http.createServer(async (req, res) => {
         welcomeSent: config.welcomeSent,
         groups: Array.isArray(config.groups) ? config.groups : [],
         groupsDir: groupsDir(),
+        ownerNumber: ownerNumber(),
         voice: voicePublicInfo(),
       },
       feed: feed.slice(0, 20),
@@ -2105,6 +2161,8 @@ const server = http.createServer(async (req, res) => {
             delete next.lockdownMode;
           }
         }
+        // 👤 מספר הבעלים נקבע רק בצימוד (קוד מהמסך → הודעה מהטלפון) — לא בהקלדה
+        if (next.ownerNumber !== undefined) delete next.ownerNumber;
         // Green API — פרטי חיבור. token ריק = לא לגעת בקיים (המסך לא מציג אותו)
         let needsRestart = false;
         if (next.greenApi && typeof next.greenApi === "object") {
@@ -2250,6 +2308,30 @@ const server = http.createServer(async (req, res) => {
         });
         res.end(JSON.stringify({ ok: false, error: greenErrorHe(e.message) }));
       });
+    return;
+  }
+
+  // POST /pair/start — קוד צימוד לטלפון האישי (6 ספרות, 10 דקות, חד-פעמי)
+  if (req.method === "POST" && url.pathname === "/pair/start") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    if (state.status !== "connected") {
+      res.end(JSON.stringify({ ok: false, error: "קודם מחברים את העוזר לוואטסאפ (מסך ראשי ← מחובר)" }));
+      return;
+    }
+    const code = String(100000 + (randomBytes(4).readUInt32BE(0) % 900000));
+    state.pairing = { code, expires: Date.now() + 10 * 60 * 1000 };
+    console.log("[pair] קוד צימוד נוצר (תקף 10 דקות)");
+    res.end(JSON.stringify({ ok: true, code, expiresIn: 600 }));
+    return;
+  }
+  // POST /pair/clear — ביטול הטלפון האישי (חזרה ל"רק הצ'אט-עם-עצמי")
+  if (req.method === "POST" && url.pathname === "/pair/clear") {
+    config.ownerNumber = "";
+    saveConfig(config);
+    state.pairing = null;
+    console.log("[pair] 👤 הטלפון האישי הוסר");
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 
