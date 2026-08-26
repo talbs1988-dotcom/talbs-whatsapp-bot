@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="app-build" content="2026.08.26-2" />
+    <meta name="app-build" content="2026.08.26-3" />
     <title>העוזר האישי שלי · טל בשור</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -978,9 +978,19 @@
             <label>העוזר שולח את ההודעה הזו כשהוא נדלק לראשונה</label>
             <textarea
               id="welcomeMessage"
-              placeholder="היי 💛 אני העוזר האישי שלך..."
+              placeholder="היי 💛 אני {agentName}..."
               style="min-height: 100px"
             ></textarea>
+            <small
+              style="
+                color: var(--smoke);
+                font-size: 12px;
+                display: block;
+                margin-top: 6px;
+              "
+            >
+              אפשר לכתוב <code>{agentName}</code> — יוחלף בשם שנתתם לעוזר.
+            </small>
             <div style="margin-top: 12px">
               <button class="btn btn-ghost" id="resend-welcome-btn">
                 📤 שלח שוב לוואטסאפ
@@ -1062,7 +1072,7 @@
           <h3>📨 השיחות שלך עם העוזר</h3>
           <div id="feed-list">
             <div class="feed-empty">
-              עוד אין הודעות. שלח/י לעצמך "היי" בוואטסאפ.
+              עוד אין הודעות. שולחים לעצמכם "היי" בוואטסאפ.
             </div>
           </div>
         </div>
@@ -1168,7 +1178,7 @@
         body.innerHTML = `
         <div class="big-check">🎉</div>
         <h2 style="font-size:22px; font-weight:600;">העוזר שלך מחובר!</h2>
-        <div class="me">מחובר כ-<strong>${s.meName || "הוואטסאפ שלך"}</strong> · ${phone}${
+        <div class="me">מחובר כ-<strong>${escHtml(s.meName || "הוואטסאפ שלך")}</strong> · ${escHtml(phone)}${
           s.config && s.config.provider === "green-api"
             ? " · דרך Green API 🟩"
             : ""
@@ -1184,7 +1194,7 @@
         }
         <div class="send-test" style="background:#eaf7ee; border:1px solid #bfe6cc;">
           <h3 style="color:#1f7a3f;">🔒 העוזר מדבר רק עם המספר הזה</h3>
-          <p>רק <strong>${phone}</strong> — הטלפון שסרק את ה-QR — יכול לדבר עם העוזר. כל מספר אחר שישלח הודעה ייחסם אוטומטית. זו הגנה מובנית, ואי אפשר לכבות אותה מהמסך.</p>
+          <p>רק <strong>${escHtml(phone)}</strong> — הטלפון שסרק את ה-QR — יכול לדבר עם העוזר. כל מספר אחר שישלח הודעה ייחסם אוטומטית. זו הגנה מובנית, ואי אפשר לכבות אותה מהמסך.</p>
           <p style="margin-top:6px; font-size:12px; color:var(--smoke);">להחליף טלפון? לחצו "התחבר מחדש" וסרקו מהטלפון החדש.</p>
         </div>
         <div class="send-test" style="background:#fffbf1; border:1px solid var(--gold);">
@@ -1193,7 +1203,7 @@
         </div>
         <div class="send-test">
           <h3>🚀 שלחו לעצמכם הודעה לבדיקה</h3>
-          <p>פתחו את הצ'אט שלכם עם עצמכם ב-WhatsApp ושלחו <code>היי</code>. העוזר יענה תוך ~3 שניות.</p>
+          <p>פותחים את הצ'אט שלכם עם עצמכם ב-WhatsApp ושולחים <code>היי</code>. התשובה הראשונה יכולה לקחת עד חצי דקה (Claude מתעורר) — אחר כך זה מהיר יותר.</p>
         </div>
         <div class="stats">
           <div class="stat">📥 <strong>${s.stats.messagesIn}</strong> נכנסו</div>
@@ -1201,6 +1211,9 @@
           ${s.stats.errors ? `<div class="stat" style="color:var(--red);">⚠️ <strong>${s.stats.errors}</strong> שגיאות</div>` : ""}
           ${s.config && s.config.groups && s.config.groups.length ? `<div class="stat">👥 מאזין ל-<strong>${s.config.groups.length}</strong> קבוצות</div>` : ""}
         </div>`;
+        wireUsePolling();
+      }
+      function wireUsePolling() {
         const usePolling = document.getElementById("use-polling-btn");
         if (usePolling) {
           usePolling.onclick = async () => {
@@ -1228,8 +1241,8 @@
         <div class="big-check">🟩</div>
         <h2 style="font-size:20px; font-weight:600;">חיבור דרך Green API — חסרים פרטים</h2>
         <p style="color:var(--smoke); margin:8px 0 14px; line-height:1.6;">${
-          (s && s.lastError) ||
-          'מזינים Instance ID ו-API Token בהגדרות ולוחצים "חיבור דרך Green API". אחרי זה ה-QR יופיע כאן.'
+          escHtml((s && s.lastError) ||
+          'מזינים Instance ID ו-API Token בהגדרות ולוחצים "חיבור דרך Green API". אחרי זה ה-QR יופיע כאן.')
         }</p>
         <button class="btn btn-primary" id="goto-green-btn">⚙️ להגדרות החיבור</button>`;
         document.getElementById("goto-green-btn").onclick = () => {
@@ -1245,13 +1258,13 @@
       function renderReconnecting(label) {
         document.getElementById("hero-body").innerHTML = `
         <div class="spinner"></div>
-        <p style="margin-top:12px; color:var(--smoke);">${label}</p>`;
+        <p style="margin-top:12px; color:var(--smoke);">${escHtml(label || "")}</p>`;
       }
 
       function renderError(msg) {
         document.getElementById("hero-body").innerHTML = `
         <div class="big-check">😕</div>
-        <p style="color:var(--red); margin-bottom:8px;">${msg || "משהו נתקע"}</p>
+        <p style="color:var(--red); margin-bottom:8px;">${escHtml(msg || "משהו נתקע")}</p>
         <button class="btn btn-ghost" onclick="location.reload()">רענון</button>`;
       }
 
@@ -1280,16 +1293,17 @@
         updateUnread(feed);
         if (!feed || feed.length === 0) {
           list.innerHTML =
-            '<div class="feed-empty">עוד אין הודעות. שלח/י לעצמך "היי" בוואטסאפ.</div>';
+            '<div class="feed-empty">עוד אין הודעות. שולחים לעצמכם "היי" בוואטסאפ.</div>';
           return;
         }
         list.innerHTML = feed
           .map((f) => {
             const arrow = f.dir === "in" ? "📥" : "📤";
+            const isGroup = String(f.from || "").startsWith("👥");
             const who =
               f.dir === "in"
-                ? `מ-${f.from}${f.selfChat ? " (אתה לעצמך)" : ""}`
-                : `אל-${f.to}`;
+                ? `מ-${escHtml(f.from || "")}${f.selfChat && !isGroup ? " (הצ'אט שלך עם עצמך)" : ""}`
+                : `אל-${escHtml(f.to || "")}`;
             const tm = new Date(f.ts).toLocaleTimeString("he-IL", {
               hour: "2-digit",
               minute: "2-digit",
@@ -1492,6 +1506,7 @@
         selectedGroups = new Map(
           (cfg.groups || []).map((g) => [g.id, g.name || g.id]),
         );
+        groupsDirty = false;
         renderGroups();
         const g = cfg.greenApi || {};
         document.getElementById("greenInstanceId").value = g.instanceId || "";
@@ -1518,7 +1533,9 @@
         const s = await fetchState();
         if (!s) {
           setStatusBadge("אין חיבור לשרת", "error");
-          renderError("השרת לא מגיב — וודאו שה-Terminal עם העוזר עוד פתוח.");
+          renderReconnecting(
+            "העוזר מופעל מחדש — המסך יתעדכן לבד תוך כמה שניות. אם זה נמשך יותר מדקה: לחיצה על האייקון 'העוזר האישי' על שולחן העבודה.",
+          );
           return;
         }
         // העוזר הופעל מחדש (bootId השתנה) → הדף הזה מחזיק מפתח ישן. מרעננים לבד.
@@ -1564,7 +1581,11 @@
         <div class="send-test" style="background:#fff4e5; border:1px solid #f5c26b; margin-top:14px;">
           <p>${(s.lastError || "").replace(/</g, "&lt;")}</p>
         </div>
-        <button class="btn btn-ghost" style="margin-top:14px" id="green-reconnect-btn">🔄 ניקיתי — נסה להתחבר שוב</button>`;
+        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:14px;">
+          <button class="btn btn-primary" id="use-polling-btn">🔌 נקה את ה-webhook והפעל את העוזר</button>
+          <button class="btn btn-ghost" id="green-reconnect-btn">🔄 ניקיתי בעצמי — נסה שוב</button>
+        </div>`;
+          wireUsePolling();
           document.getElementById("green-reconnect-btn").onclick = async (ev) => {
             ev.target.disabled = true;
             ev.target.textContent = "מתחבר...";
@@ -1624,21 +1645,32 @@
             id,
             name,
           }));
-          // קובץ ההנחיות נשמר בנפרד — לתיקיית העבודה (לא ל-config)
-          fetch("/brain", {
-            method: "POST",
-            body: JSON.stringify({
-              text: document.getElementById("brainText").value,
-            }),
-          }).catch(() => {});
+          // קובץ ההנחיות נשמר בנפרד — לתיקיית העבודה (לא ל-config). מחכים לתשובה ומדווחים.
+          let brainErr = "";
+          try {
+            const b = await fetch("/brain", {
+              method: "POST",
+              body: JSON.stringify({
+                text: document.getElementById("brainText").value,
+              }),
+            });
+            if (!b.ok)
+              brainErr =
+                "❌ קובץ ההנחיות לא נשמר — התיקייה שנבחרה לא קיימת. בוחרים תיקייה מחדש.";
+          } catch {
+            brainErr = "❌ קובץ ההנחיות לא נשמר";
+          }
           const r = await fetch("/config", {
             method: "POST",
             body: JSON.stringify(next),
           });
-          if (!r.ok) {
+          if (!r.ok || brainErr) {
             // לא לשתוק: התלמיד צריך לדעת שלא נשמר, ולמה
             const flash = document.getElementById("saved-flash");
-            flash.textContent = "❌ לא נשמר — נסו לרענן את הדף";
+            flash.textContent = !r.ok
+              ? "❌ לא נשמר — " +
+                ((await r.json().catch(() => ({}))).error || "נסו לרענן את הדף")
+              : brainErr;
             flash.style.background = "#fee2e2";
             flash.style.color = "#991b1b";
             flash.classList.add("show");
@@ -1649,7 +1681,7 @@
               flash.style.color = "";
             }, 4000);
           }
-          if (r.ok) {
+          if (r.ok && !brainErr) {
             const flash = document.getElementById("saved-flash");
             flash.classList.add("show");
             setTimeout(() => flash.classList.remove("show"), 1500);
@@ -1681,7 +1713,11 @@
             localStorage.setItem("talbs-bot-tab", "home"); // ה-QR החדש מוצג בראשי
           } catch {}
           await fetch("/reset", { method: "POST" });
-          setTimeout(() => location.reload(), 2000);
+          showTab("home");
+          setStatusBadge("מנתק...", "");
+          renderReconnecting("מנתק ומכין QR חדש…");
+          await waitForRestart();
+          location.reload();
         });
 
       // ----- 📁 בחר תיקייה — פותח את חלון הבחירה של המחשב -----
@@ -1703,6 +1739,10 @@
               const b = await (await fetch("/brain")).json();
               if (b && b.ok)
                 document.getElementById("brainText").value = b.text || "";
+            } else if (j.error === "inside-bot-dir") {
+              alert(
+                "התיקייה של העוזר עצמו לא יכולה להיות תיקיית העבודה (עדכון היה מוחק את הקבצים שלכם). בוחרים תיקייה אחרת — למשל על שולחן העבודה.",
+              );
             } else if (!j.cancelled) {
               alert(
                 "לא הצלחתי לפתוח את חלון הבחירה. אפשר ללחוץ 'צור תיקייה חדשה' — היא תיווצר על שולחן העבודה ותיבחר לבד.",
@@ -1824,7 +1864,7 @@
           result.className = "check-result";
           result.textContent = "בודק... (שולח שאלת בדיקה ל-Claude, עד דקה)";
           try {
-            const r = await fetch("/check-claude");
+            const r = await fetch("/check-claude", { method: "POST" });
             const j = await r.json();
             if (j.ok) {
               result.className = "check-result ok";
@@ -1906,8 +1946,11 @@
               })
             ).json();
             st.className = j.ok ? "check-result ok" : "check-result fail";
+            const typed = !!document.getElementById("openaiKey").value.trim();
             st.textContent = j.ok
-              ? '✅ המפתח תקין — לוחצים "שמירת הגדרות"'
+              ? typed
+                ? '✅ המפתח תקין — לוחצים "שמירת הגדרות"'
+                : "✅ המפתח השמור תקין — הודעות קוליות פעילות"
               : "❌ " + (j.error || "שגיאה");
           } catch (e) {
             st.className = "check-result fail";
@@ -1937,13 +1980,18 @@
           .replace(/</g, "&lt;")
           .replace(/"/g, "&quot;");
       }
+      let groupsDirty = false; // האם הבחירה שונה ממה שנשמר
       function updateGroupsCount(saved) {
+        if (saved === true) groupsDirty = false;
+        if (saved === false) groupsDirty = true;
         const nSel = selectedGroups.size;
         document.getElementById("groups-count").textContent = nSel
-          ? saved
-            ? `✓ נשמר — העוזר מאזין ל-${nSel} קבוצות.`
-            : `נבחרו ${nSel} קבוצות — לוחצים "שמירת הגדרות" כדי שהעוזר יתחיל להאזין.`
-          : "עוד לא נבחרו קבוצות.";
+          ? groupsDirty
+            ? `נבחרו ${nSel} קבוצות — לוחצים "שמירת הגדרות" כדי שהעוזר יתחיל להאזין.`
+            : `✓ העוזר מאזין ל-${nSel} קבוצות.`
+          : groupsDirty
+            ? 'לא נבחרו קבוצות — לוחצים "שמירת הגדרות" כדי להפסיק להאזין.'
+            : "עוד לא נבחרו קבוצות.";
       }
       function renderGroups() {
         const q = (document.getElementById("groups-search").value || "")
@@ -1969,6 +2017,7 @@
               `<label class="group-row${selectedGroups.has(g.id) ? " checked" : ""}"><input type="checkbox" data-id="${escHtml(g.id)}" ${selectedGroups.has(g.id) ? "checked" : ""}/> <span>${escHtml(g.name)}</span>${seenGroups.has(g.id) ? '<span class="live-badge" style="margin-right:auto">נראתה בהודעה</span>' : ""}</label>`,
           )
           .join("");
+        updateGroupsCount(null);
         list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
           cb.addEventListener("change", () => {
             const id = cb.dataset.id;
@@ -1978,7 +2027,6 @@
             updateGroupsCount(false);
           });
         });
-        updateGroupsCount(false);
       }
       document
         .getElementById("groups-search")

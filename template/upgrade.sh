@@ -60,6 +60,12 @@ done
 rm -rf "$TMPD"
 chmod +x run.sh start.command 2>/dev/null || true
 # config.json + .env + auth נשארים כמו שהם (ההגדרות והחיבור של המשתמש)
+# פרטיות: התיקייה והקבצים רק למשתמש הזה
+chmod 700 "$BOT_DIR" 2>/dev/null || true
+[ -d "$BOT_DIR/auth" ] && chmod -R go-rwx "$BOT_DIR/auth" 2>/dev/null || true
+for f in config.json .env sessions.json green-seen.json groups-seen.json feed.json; do
+  [ -f "$BOT_DIR/$f" ] && chmod 600 "$BOT_DIR/$f" || true
+done
 mkdir -p "$LOG_DIR"
 touch "$LOG"
 chmod 600 "$LOG"
@@ -128,7 +134,7 @@ launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIS
 make_launcher() {
   local APP="$1"
   rm -rf "$APP"
-  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; open http://127.0.0.1:7655"' 2>/dev/null || return 1
+  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s --noproxy \"*\" -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; open http://127.0.0.1:7655"' 2>/dev/null || return 1
   if [ -f "$BOT_DIR/app-icon.icns" ]; then
     cp "$BOT_DIR/app-icon.icns" "$APP/Contents/Resources/applet.icns" 2>/dev/null || true
     touch "$APP"
@@ -143,7 +149,7 @@ fi
 # ---------- 5) אימות אמיתי: הדף המוגש נושא בדיוק את מזהה הגרסה שירדה ----------
 OK=""
 for i in $(seq 1 40); do
-  curl -s "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$NEW_BUILD" && { OK=1; break; }
+  curl -s --noproxy '*' "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$NEW_BUILD" && { OK=1; break; }
   sleep 0.5
 done
 
