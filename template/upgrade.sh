@@ -147,9 +147,11 @@ if make_launcher "$HOME/Desktop/העוזר האישי.app"; then
 fi
 
 # ---------- 5) אימות אמיתי: הדף המוגש נושא בדיוק את מזהה הגרסה שירדה ----------
+# המסך נפתח רק עם מפתח הכניסה (.ui-key) — בלי המפתח מקבלים דף שער בלי מזהה גרסה.
 OK=""
-for i in $(seq 1 40); do
-  curl -s --noproxy '*' "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$NEW_BUILD" && { OK=1; break; }
+for i in $(seq 1 60); do
+  UIK="$(cat "$BOT_DIR/.ui-key" 2>/dev/null || true)"
+  if [ -n "$UIK" ] && curl -s --noproxy '*' -H "Cookie: ui=$UIK" "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$NEW_BUILD"; then OK=1; break; fi
   sleep 0.5
 done
 

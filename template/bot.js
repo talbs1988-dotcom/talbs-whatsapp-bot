@@ -865,7 +865,7 @@ async function handleGroupMessage(msg) {
   state.stats.groupMessages++;
   // רק ההודעות של בעל/ת העסק, ורק כשפונים לעוזר בשם — מפעילות אותו. התשובה בצ'אט הפרטי.
   if (!fromMe) return;
-  if (isStale(tsSec)) return; // הודעה ישנה (הצטברה כשהעוזר היה כבוי) — מתועדת, לא מופעלת
+  if (isStale(tsSec, msg.maxAgeMs || DRAIN_MAX_AGE_MS)) return; // ישנה (הצטברה כשהעוזר היה כבוי) — מתועדת, לא מופעלת
   const ask = groupTrigger(text);
   if (!ask) return;
   const target = state.meLid || state.meJid;
@@ -1030,6 +1030,8 @@ function greenErrorHe(msg) {
     return "Instance ID לא נמצא ב-Green API — בודקים את המספר בהגדרות.";
   if (/HTTP 429/i.test(m))
     return "Green API מגביל קצב כרגע (429). העוזר ינסה שוב בעוד רגע.";
+  if (/HTTP 5\d\d/i.test(m))
+    return "תקלה זמנית בשרתים של Green API (לא אצלכם). העוזר ממשיך לנסות; הודעות שנשלחו בינתיים ייענו כשהשירות יחזור.";
   if (/abort|timeout|fetch failed|ENOTFOUND|ECONN/i.test(m))
     return "אין תקשורת עם Green API — בודקים חיבור לאינטרנט. העוזר ינסה שוב.";
   return `שגיאת Green API: ${m.slice(0, 160)}`;
@@ -1321,6 +1323,8 @@ const GREEN_SEEN_PATH = path.join(__dirname, "green-seen.json");
 // הודעות שחיכו בתור בזמן שהעוזר היה כבוי: עד 10 דקות — עונים (התלמיד מחכה לתשובה).
 // ישנות יותר — מנקים בלי תשובה (תשובה מאוחרת/כפולה מבלבלת יותר משתיקה).
 const DRAIN_MAX_AGE_MS = 10 * 60 * 1000;
+// בזמן ריצה רגילה: אם Green היה מושבת (500) לחצי שעה, ההודעות שחיכו עדיין נענות — עד שעתיים.
+const LIVE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 // חותמת זמן של הודעה בשניות (Baileys: מספר או Long; Green: timestamp בגוף)
 function msgTimestampSec(msg) {
   const t = msg?.messageTimestamp;
@@ -1330,9 +1334,9 @@ function msgTimestampSec(msg) {
   return Number(t) || 0;
 }
 // "ישנה" = הגיעה לפני יותר מ-10 דקות (העוזר היה כבוי). כלל אחד לשני הספקים.
-function isStale(tsSec) {
+function isStale(tsSec, maxAgeMs = DRAIN_MAX_AGE_MS) {
   const ms = Number(tsSec || 0) * 1000;
-  return ms > 0 && Date.now() - ms > DRAIN_MAX_AGE_MS;
+  return ms > 0 && Date.now() - ms > maxAgeMs;
 }
 let greenSeen = [];
 try {
@@ -1473,6 +1477,8 @@ async function handleGreenNotification(body, opts = {}) {
       },
       pushName: body.senderData?.senderName || "",
       messageTimestamp: body.timestamp || 0,
+      // תור ישן בעלייה → 10 דק'; polling חי (גם אחרי תקלה זמנית של Green) → עד שעתיים
+      maxAgeMs: opts.fromDrain ? DRAIN_MAX_AGE_MS : LIVE_MAX_AGE_MS,
       message,
     });
   } finally {
@@ -1698,7 +1704,7 @@ async function handleMessage(msg) {
 
   // הודעה ישנה (הצטברה כשהעוזר/המחשב היו כבויים, יותר מ-10 דקות): לא עונים —
   // תשובה מאוחרת/כפולה מבלבלת יותר משתיקה. מתועד בפיד כדי שיהיה ברור מה קרה.
-  if (isStale(msgTimestampSec(msg))) {
+  if (isStale(msgTimestampSec(msg), msg.maxAgeMs || DRAIN_MAX_AGE_MS)) {
     const shown = text || (m.audioMessage ? "🎤 הודעה קולית" : "(מדיה)");
     console.log(`[skip/stale] ${remoteUser}: ${shown.slice(0, 60)}`);
     pushFeed({

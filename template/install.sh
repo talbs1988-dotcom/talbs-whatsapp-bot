@@ -196,9 +196,11 @@ fi
 # לא "הפורט תפוס" (זה יכול להיות תהליך ישן). משווים את מזהה הגרסה שבקובץ שירד
 # למזהה שבדף שהשרת מגיש בפועל. שונה = גרסה ישנה עדיין רצה = לא מצליח.
 # --noproxy: במחשב עם proxy מוגדר curl היה שולח את 127.0.0.1 ל-proxy ונכשל בטעות.
+# המסך נפתח רק עם מפתח הכניסה (.ui-key שהעוזר יוצר בעלייה) — בלי המפתח מקבלים דף שער בלי מזהה גרסה.
 OK=""
-for i in $(seq 1 40); do
-  if curl -s --noproxy '*' "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$BUILD"; then OK=1; break; fi
+for i in $(seq 1 60); do
+  UIK="$(cat "$BOT_DIR/.ui-key" 2>/dev/null || true)"
+  if [ -n "$UIK" ] && curl -s --noproxy '*' -H "Cookie: ui=$UIK" "http://127.0.0.1:$PORT/" 2>/dev/null | grep -qF "$BUILD"; then OK=1; break; fi
   sleep 0.5
 done
 
