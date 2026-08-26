@@ -9,4 +9,5 @@ logs/
 .opened
 .DS_Store
 .env
+.ui-key
 config.json

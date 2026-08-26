@@ -63,7 +63,7 @@ chmod +x run.sh start.command 2>/dev/null || true
 # פרטיות: התיקייה והקבצים רק למשתמש הזה
 chmod 700 "$BOT_DIR" 2>/dev/null || true
 [ -d "$BOT_DIR/auth" ] && chmod -R go-rwx "$BOT_DIR/auth" 2>/dev/null || true
-for f in config.json .env sessions.json green-seen.json groups-seen.json feed.json; do
+for f in config.json .env .ui-key sessions.json green-seen.json groups-seen.json feed.json; do
   [ -f "$BOT_DIR/$f" ] && chmod 600 "$BOT_DIR/$f" || true
 done
 mkdir -p "$LOG_DIR"
@@ -134,7 +134,7 @@ launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || launchctl load -w "$PLIS
 make_launcher() {
   local APP="$1"
   rm -rf "$APP"
-  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s --noproxy \"*\" -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; open http://127.0.0.1:7655"' 2>/dev/null || return 1
+  osacompile -o "$APP" -e 'do shell script "launchctl kickstart gui/$(id -u)/com.talbs.workshop-bot >/dev/null 2>&1 || (cd \"$HOME/talbs-whatsapp-bot\" && nohup /bin/bash run.sh >/dev/null 2>&1 &); for i in $(seq 1 40); do curl -s --noproxy \"*\" -o /dev/null http://127.0.0.1:7655/ && break; sleep 0.5; done; KEY=$(cat \"$HOME/talbs-whatsapp-bot/.ui-key\" 2>/dev/null); open \"http://127.0.0.1:7655/?key=$KEY\""' 2>/dev/null || return 1
   if [ -f "$BOT_DIR/app-icon.icns" ]; then
     cp "$BOT_DIR/app-icon.icns" "$APP/Contents/Resources/applet.icns" 2>/dev/null || true
     touch "$APP"
@@ -159,7 +159,7 @@ if [ -n "$OK" ]; then
   echo "✅ לא נדרשה סריקה מחדש — החיבור וההגדרות נשמרו."
   echo "✅ אם המחשב יכובה — העוזר יקום אוטומטית כשתפעילו מחדש."
   echo ""
-  open "http://127.0.0.1:$PORT"
+  open "http://127.0.0.1:$PORT/?key=$(cat "$BOT_DIR/.ui-key" 2>/dev/null)"
 else
   echo "⚠️ העדכון הסתיים אבל המסך המוגש אינו הגרסה החדשה."
   echo "   השורות האחרונות מהלוג:"
