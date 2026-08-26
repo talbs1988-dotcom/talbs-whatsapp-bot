@@ -10,6 +10,7 @@ import {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
@@ -153,7 +154,7 @@ const DEFAULT_SYSTEM_PROMPT = `אתה "{agentName}" — Claude Code המלא, מ
 
 חשוב: התחל כל תשובה שלך באמוג'י רובוט 🤖 ורווח (לדוגמה: "🤖 הוספתי לקלנדר..."). זה הסימן הויזואלי שמבדיל בין מה שאתה עונה לבין מה שנכתב בצ'אט על ידי בעל/ת העסק.`;
 
-const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני העוזר האישי שלך — טל בשור, עסק שעובד בשבילך.
+const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני {agentName} — טל בשור, עסק שעובד בשבילך.
 
 לפני שמתחילים — *לפנות אליך בלשון זכר או נקבה?*
 תענה/י לי במילה אחת: *זכר* או *נקבה*
@@ -165,10 +166,20 @@ const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני העוזר האישי שלך
 
 אני פה.`;
 
+// הודעת הברכה עם השם שנתנו לעוזר ({agentName} מתמלא בזמן השליחה, לא בזמן השמירה)
+function welcomeText() {
+  return String(config.welcomeMessage || "").replace(
+    /\{agentName\}/g,
+    config.agentName || "העוזר האישי שלך",
+  );
+}
+
 function defaultConfig() {
   return {
-    agentName: "העוזר האישי שלי",
+    agentName: "העוזר האישי",
     workdir: process.env.HOME,
+    // 👥 קבוצות שהעוזר מאזין להן (קריאה בלבד — לעולם לא כותב בקבוצה): [{ id, name }]
+    groups: [],
     model: "sonnet",
     mode: "personal",
     provider: "baileys", // "baileys" (כרום — QR מקומי) | "green-api"
@@ -238,7 +249,7 @@ const state = {
   meJid: null,
   meLid: null,
   meName: null,
-  stats: { messagesIn: 0, messagesOut: 0, errors: 0 },
+  stats: { messagesIn: 0, messagesOut: 0, errors: 0, groupMessages: 0 },
   lastError: null,
   greenLastPoll: null, // Green API — מתי נמשכו הודעות לאחרונה
   greenWebhookConflict: false, // Green API — מוגדר webhookUrl שגוזל את ההודעות מהבוט
@@ -273,6 +284,13 @@ function isAlreadyHandled(id) {
 // פונקציה אחת לכל שליחת הודעה - שמרשמת את ה-id כדי שלא נטפל בה כשנקבל אותה כ-echo
 async function sendBotMessage(jid, text) {
   try {
+    // 👥 קבוצות: העוזר מאזין בלבד. שום הודעה לא יוצאת לקבוצה — בשום מצב.
+    if (String(jid || "").endsWith("@g.us")) {
+      console.log(
+        `[BLOCKED-SEND] 🚨 ניסיון לכתוב בקבוצה ${jid} — העוזר לא כותב בקבוצות`,
+      );
+      return null;
+    }
     // 🛡️ אבטחה קריטית — שכבת הגנה אחרונה ביציאה:
     // לעולם אל תשלח למספר שאינו של בעל המכשיר. גם אם בלוגיקה הפנימית
     // הייתה בעיה שאיפשרה לעבד הודעה זרה — כאן זה נחסם בכל מקרה.
@@ -492,6 +510,7 @@ function applyModelSwitch(text) {
 
 // ----- WhatsApp socket -----
 let sock;
+let baileysEverOpened = false; // האם היה חיבור מוצלח בתהליך הזה (ל-watchdog)
 
 // ----- Provider abstraction (כרום/Baileys או Green API) -----
 function isGreen() {
@@ -529,6 +548,239 @@ function restartProcess(reason) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// טקסט מתוך הודעה (משותף לצ'אט פרטי ולקבוצות)
+function extractText(m) {
+  if (!m) return "";
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    ""
+  );
+}
+
+// ----- 🎤 הודעות קוליות — תמלול דרך OpenAI (Whisper). אופציונלי. המפתח ב-.env בלבד -----
+const VOICE_MODEL = "whisper-1";
+let lastNoKeyNotice = 0; // מתי הסברנו לאחרונה שאין מפתח (לא על כל הקלטה)
+function voiceKey() {
+  return String(process.env.OPENAI_API_KEY || "").trim();
+}
+function voicePublicInfo() {
+  return { hasKey: !!voiceKey(), model: VOICE_MODEL };
+}
+function openaiBase() {
+  // לבדיקות בלבד (שרת מדומה מקומי). לא מוגדר אצל תלמידים.
+  return (process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(
+    /\/$/,
+    "",
+  );
+}
+async function voiceCheckKey(key) {
+  const r = await fetch(`${openaiBase()}/v1/models/${VOICE_MODEL}`, {
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok)
+    throw new Error(
+      `openai → HTTP ${r.status}: ${(await r.text()).slice(0, 160)}`,
+    );
+  return true;
+}
+function voiceErrorHe(msg) {
+  const m = String(msg || "");
+  if (/no-key/.test(m))
+    return "אין מפתח OpenAI. מדביקים אותו בהגדרות ← הודעות קוליות.";
+  if (/HTTP 401/.test(m))
+    return "OpenAI דחה את המפתח — בודקים שהמפתח הודבק נכון (מתחיל ב-sk-).";
+  if (/HTTP 429|insufficient_quota/.test(m))
+    return "OpenAI: אין יתרה בחשבון (או חריגה מהמכסה). טוענים קרדיט ב-platform.openai.com.";
+  if (/HTTP 413|too large/i.test(m))
+    return "ההקלטה גדולה מדי לתמלול (המגבלה 25MB).";
+  if (/abort|timeout|fetch failed|ENOTFOUND|ECONN/i.test(m))
+    return "אין תקשורת עם OpenAI — בודקים חיבור לאינטרנט.";
+  return `התמלול נכשל: ${m.slice(0, 120)}`;
+}
+async function transcribeAudio(buf, mime) {
+  const key = voiceKey();
+  if (!key) throw new Error("no-key");
+  const mt = String(mime || "audio/ogg").split(";")[0].trim() || "audio/ogg";
+  const ext = /mp4|m4a/.test(mt)
+    ? "m4a"
+    : /mpeg|mp3/.test(mt)
+      ? "mp3"
+      : /wav/.test(mt)
+        ? "wav"
+        : /webm/.test(mt)
+          ? "webm"
+          : "ogg";
+  const form = new FormData();
+  form.append("file", new Blob([buf], { type: mt }), `voice.${ext}`);
+  form.append("model", VOICE_MODEL);
+  const r = await fetch(`${openaiBase()}/v1/audio/transcriptions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+    signal: AbortSignal.timeout(120000),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`openai → HTTP ${r.status}: ${text.slice(0, 160)}`);
+  try {
+    return String(JSON.parse(text).text || "").trim();
+  } catch {
+    return "";
+  }
+}
+// מוריד את קובץ הקול מהספק הפעיל (Green: קישור הורדה · כרום: דרך Baileys)
+async function fetchAudio(msg) {
+  const a = msg.message?.audioMessage || {};
+  if (a.green) {
+    let url = a.url;
+    if (!url) {
+      const d = await greenCall("downloadFile", {
+        verb: "POST",
+        body: { chatId: a.chatId, idMessage: a.idMessage },
+        timeoutMs: 30000,
+      });
+      url = d?.downloadUrl || "";
+    }
+    if (!url) throw new Error("no download url");
+    const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`download → HTTP ${r.status}`);
+    return {
+      buf: Buffer.from(await r.arrayBuffer()),
+      mime: a.mimetype || r.headers.get("content-type") || "audio/ogg",
+    };
+  }
+  if (!sock) throw new Error("WhatsApp socket not ready");
+  const buf = await downloadMediaMessage(
+    msg,
+    "buffer",
+    {},
+    { logger: pino({ level: "silent" }), reuploadRequest: sock.updateMediaMessage },
+  );
+  return { buf, mime: a.mimetype || "audio/ogg" };
+}
+
+// ----- 👥 קבוצות — העוזר מאזין (שומר לקובץ), ולעולם לא כותב בקבוצה -----
+// למה קובץ: Claude Code קורא קבצים מתיקיית העבודה. כך בעל/ת העסק שואל/ת בצ'אט הפרטי
+// "מה היה היום בקבוצת הצוות?" והעוזר עונה מהקובץ. שום דבר לא יוצא מהמחשב.
+function enabledGroup(jid) {
+  return (config.groups || []).find((g) => g && g.id === jid) || null;
+}
+function safeFileName(sname) {
+  return (
+    String(sname || "")
+      .replace(/[\\/:*?"<>|\n\r\t]/g, "")
+      .trim()
+      .slice(0, 60) || "קבוצה"
+  );
+}
+function groupsDir() {
+  return path.join(config.workdir || process.env.HOME, "קבוצות");
+}
+function groupLogPath(g) {
+  return path.join(groupsDir(), `${safeFileName(g.name || g.id)}.md`);
+}
+function appendGroupLog(g, who, text, tsMs) {
+  const dir = groupsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const p = groupLogPath(g);
+  if (!fs.existsSync(p)) {
+    fs.writeFileSync(
+      p,
+      `# ${g.name || g.id}\n\nהודעות מהקבוצה, כפי שהעוזר קלט אותן (העוזר קורא בלבד — לא כותב בקבוצה).\n\n`,
+      "utf8",
+    );
+  }
+  const stamp = new Date(tsMs || Date.now()).toLocaleString("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  fs.appendFileSync(
+    p,
+    `- [${stamp}] ${who}: ${String(text).replace(/\s*\n\s*/g, " ")}\n`,
+    "utf8",
+  );
+}
+// "עוזר, תסכם" / "@עוזר ..." / "<שם העוזר> ..." בתוך קבוצה — רק זה מפעיל אותו (ורק מבעל/ת העסק)
+function groupTrigger(text) {
+  const t = String(text || "").trim();
+  const rx = /^@?(עוזר|העוזר)[\s,:־–-]+/;
+  if (rx.test(t)) return t.replace(rx, "").trim();
+  const name = String(config.agentName || "").trim();
+  if (name && t.startsWith(name))
+    return t
+      .slice(name.length)
+      .replace(/^[\s,:־–-]+/, "")
+      .trim();
+  return null;
+}
+async function handleGroupMessage(msg) {
+  const jid = msg.key.remoteJid;
+  const g = enabledGroup(jid);
+  if (!g) return; // קבוצה שלא נבחרה במסך — מתעלמים לגמרי
+  const text = extractText(msg.message);
+  if (!text) return; // קול/מדיה בקבוצות — לא מתמללים (עלות) ולא שומרים
+  const fromMe = !!msg.key.fromMe;
+  const who = fromMe
+    ? "אני"
+    : msg.pushName || jidUser(msg.key.participant || "") || "משתתף";
+  const tsMs = msg.messageTimestamp
+    ? Number(msg.messageTimestamp) * 1000
+    : Date.now();
+  try {
+    appendGroupLog(g, who, text, tsMs);
+  } catch (e) {
+    console.error("[group/log] failed:", e.message);
+  }
+  state.stats.groupMessages++;
+  // רק ההודעות של בעל/ת העסק, ורק כשפונים לעוזר בשם — מפעילות אותו. התשובה בצ'אט הפרטי.
+  if (!fromMe) return;
+  const ask = groupTrigger(text);
+  if (!ask) return;
+  const target = state.meLid || state.meJid;
+  if (!target) return;
+  pushFeed({ dir: "in", from: `👥 ${g.name}`, text, selfChat: true });
+  console.log(`[group/${g.name}] בקשה מבעל/ת העסק: ${ask.slice(0, 80)}`);
+  const prompt = `בעל/ת העסק כתב/ה בקבוצת WhatsApp "${g.name}" ופנה/תה אליך:
+"${ask}"
+
+ההודעות של הקבוצה שמורות בקובץ: ${groupLogPath(g)} — קרא אותו אם צריך הקשר.
+ענה כאן, בצ'אט הפרטי. אתה לא כותב בקבוצה עצמה (ואין לך דרך לעשות זאת).`;
+  const reply = await askClaude(target, prompt);
+  if (reply.text) {
+    const out = `👥 ${g.name}:\n${reply.text}`;
+    await sendBotMessage(target, out);
+    state.stats.messagesOut++;
+    pushFeed({ dir: "out", to: jidUser(target), text: out });
+  }
+}
+// רשימת הקבוצות של המספר המחובר — לבחירה במסך
+async function listGroups() {
+  let groups = [];
+  if (isGreen()) {
+    const contacts = await greenCall("getContacts", { timeoutMs: 45000 });
+    groups = (Array.isArray(contacts) ? contacts : [])
+      .filter((c) => c?.type === "group" || String(c?.id || "").endsWith("@g.us"))
+      .map((c) => ({ id: String(c.id), name: String(c.name || c.id) }));
+  } else {
+    if (!sock) throw new Error("WhatsApp socket not ready");
+    const all = await sock.groupFetchAllParticipating();
+    groups = Object.values(all || {}).map((g) => ({
+      id: String(g.id),
+      name: String(g.subject || g.id),
+    }));
+  }
+  return groups
+    .filter((g) => g.id.endsWith("@g.us"))
+    .sort((a, b) => a.name.localeCompare(b.name, "he"));
+}
+
 // ----- Green API provider -----
 // חיבור דרך Green API: יציב יותר מכרום, לא תלוי בדפדפן. הבוט מושך הודעות ב-polling
 // (receiveNotification) — בלי שרת ובלי כתובת ציבורית. ה-QR מגיע מ-Green API ומוצג באותו מסך.
@@ -551,6 +803,9 @@ function greenPublicInfo() {
 
 // Green API מפנה כל instance לשרת לפי 4 הספרות הראשונות (למשל 7105 → 7105.api.greenapi.com)
 function greenBaseUrl(creds) {
+  // לבדיקות בלבד (שרת מדומה מקומי). לא מוגדר אצל תלמידים.
+  if (process.env.GREEN_API_BASE_URL)
+    return `${process.env.GREEN_API_BASE_URL.replace(/\/$/, "")}/waInstance${creds.instanceId}`;
   const prefix = creds.instanceId.slice(0, 4);
   const host =
     prefix.length === 4
@@ -584,6 +839,7 @@ async function greenCall(
   try {
     r = await fetch(`${greenBaseUrl(c)}${tail}`, opts);
   } catch (e) {
+    if (process.env.GREEN_API_BASE_URL) throw e;
     // Instance ID עם קידומת לא קיימת → הכתובת הייעודית לא נפתרת ב-DNS. מנסים את הכתובת הכללית,
     // שמחזירה תשובה מסודרת (למשל 401/403) במקום "אין תקשורת" מטעה.
     r = await fetch(
@@ -807,7 +1063,7 @@ async function startGreenApi() {
   if (!config.welcomeSent && config.welcomeMessage && state.meJid) {
     setTimeout(async () => {
       if (gen !== greenGeneration) return;
-      const sent = await sendBotMessage(state.meJid, config.welcomeMessage);
+      const sent = await sendBotMessage(state.meJid, welcomeText());
       if (sent) {
         config.welcomeSent = true;
         saveConfig(config);
@@ -815,7 +1071,7 @@ async function startGreenApi() {
         pushFeed({
           dir: "out",
           to: jidUser(state.meJid),
-          text: config.welcomeMessage,
+          text: welcomeText(),
         });
         console.log(`[welcome] sent to ${state.meJid}`);
       }
@@ -902,6 +1158,9 @@ async function greenPollLoop(gen) {
 // פתרון: (1) זוכרים אילו idMessage כבר טופלו — גם אחרי ריסטארט (נשמר לקובץ);
 //         (2) בעלייה מרוקנים את התור הישן לפני שמתחילים לענות.
 const GREEN_SEEN_PATH = path.join(__dirname, "green-seen.json");
+// הודעות שחיכו בתור בזמן שהעוזר היה כבוי: עד 10 דקות — עונים (התלמיד מחכה לתשובה).
+// ישנות יותר — מנקים בלי תשובה (תשובה מאוחרת/כפולה מבלבלת יותר משתיקה).
+const DRAIN_MAX_AGE_MS = 10 * 60 * 1000;
 let greenSeen = [];
 try {
   greenSeen = JSON.parse(fs.readFileSync(GREEN_SEEN_PATH, "utf8"));
@@ -925,6 +1184,7 @@ function greenAlreadyHandled(id) {
 // מרוקן את התור שנשאר ב-Green מלפני העלייה (הודעות ישנות — לא עונים עליהן שוב)
 async function greenDrainStaleQueue(gen) {
   let drained = 0;
+  let kept = 0;
   for (let i = 0; i < 200 && gen === greenGeneration; i++) {
     let n;
     try {
@@ -939,8 +1199,19 @@ async function greenDrainStaleQueue(gen) {
     // הודעות: מסמנים כטופלו ומוחקים. אירועי מצב: נותנים להם לעבור (חשובים).
     const t = n.body?.typeWebhook;
     if (t === "incomingMessageReceived" || t === "outgoingMessageReceived") {
-      greenAlreadyHandled(n.body?.idMessage);
-      drained++;
+      const tsMs = Number(n.body?.timestamp || 0) * 1000;
+      if (tsMs && Date.now() - tsMs < DRAIN_MAX_AGE_MS) {
+        // טרייה — עונים כרגיל
+        kept++;
+        try {
+          await handleGreenNotification(n.body || {});
+        } catch (e) {
+          console.error("[green/drain-handler]", e.message);
+        }
+      } else {
+        greenAlreadyHandled(n.body?.idMessage);
+        drained++;
+      }
     } else {
       try {
         await handleGreenNotification(n.body || {});
@@ -956,9 +1227,9 @@ async function greenDrainStaleQueue(gen) {
       break;
     }
   }
-  if (drained)
+  if (drained || kept)
     console.log(
-      `[green] ניקיתי ${drained} הודעות ישנות מהתור — לא עונים עליהן שוב`,
+      `[green] תור מלפני העלייה: ${kept} טריות (עד ${DRAIN_MAX_AGE_MS / 60000} דק') נענו, ${drained} ישנות נוקו בלי תשובה`,
     );
 }
 
@@ -1001,13 +1272,30 @@ async function handleGreenNotification(body) {
     "";
   const chatId = body.senderData?.chatId || "";
   if (!chatId) return;
+  // 🎤 הודעה קולית — Green נותן קישור להורדה (ואם לא — מבקשים ב-downloadFile)
+  const isAudio = /^(audioMessage|voiceMessage|pttMessage)$/i.test(
+    md.typeMessage || "",
+  );
+  const message = { conversation: text };
+  if (isAudio && !text) {
+    message.audioMessage = {
+      green: true,
+      url: md.fileMessageData?.downloadUrl || "",
+      mimetype: md.fileMessageData?.mimeType || "audio/ogg",
+      idMessage: body.idMessage,
+      chatId,
+    };
+  }
   await handleMessage({
     key: {
       id: body.idMessage,
       fromMe: type === "outgoingMessageReceived",
       remoteJid: chatId,
+      participant: body.senderData?.sender || "",
     },
-    message: { conversation: text },
+    pushName: body.senderData?.senderName || "",
+    messageTimestamp: body.timestamp || 0,
+    message,
   });
 }
 
@@ -1047,6 +1335,7 @@ async function startBaileys() {
       state.meLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
       state.meName = sock.user?.name || sock.user?.verifiedName || "";
       resetDriftCounter(); // חיבור הצליח — מאפסים את הספירה
+      baileysEverOpened = true;
       ensureSelfWhitelisted();
       console.log(
         `[wa] connected as ${state.meJid} (lid: ${state.meLid || "none"})`,
@@ -1060,7 +1349,7 @@ async function startBaileys() {
       if (!config.welcomeSent && config.welcomeMessage) {
         setTimeout(async () => {
           const targetJid = state.meLid || state.meJid;
-          const sent = await sendBotMessage(targetJid, config.welcomeMessage);
+          const sent = await sendBotMessage(targetJid, welcomeText());
           if (sent) {
             config.welcomeSent = true;
             saveConfig(config);
@@ -1068,7 +1357,7 @@ async function startBaileys() {
             pushFeed({
               dir: "out",
               to: jidUser(targetJid),
-              text: config.welcomeMessage,
+              text: welcomeText(),
             });
             console.log(`[welcome] sent to ${targetJid}`);
           }
@@ -1083,7 +1372,12 @@ async function startBaileys() {
       // Watchdog: עקוב אחרי ניתוקים לא-צפויים. אם זוהה דריפט (5 ניתוקים ב-30 דק')
       // → אילוץ סריקה מחדש (הוא הפתרון הוודאי לדריפט של Baileys).
       let forceRescan = loggedOut;
-      if (!loggedOut && !driftRecoveryInProgress) {
+      // סופרים רק ניתוקים אחרי חיבור שהצליח. ניתוקים בזמן הסריקה הראשונה (למשל
+      // קוד 515 "restart required" מיד אחרי QR) הם חלק מחיבור תקין — לא דריפט.
+      // בלי זה: התקנה חדשה עלולה "לזהות דריפט", למחוק את החיבור ולבקש QR שוב.
+      const countable =
+        baileysEverOpened && code !== DisconnectReason.restartRequired;
+      if (!loggedOut && !driftRecoveryInProgress && countable) {
         const isDrift = trackDisconnect();
         if (isDrift) {
           driftRecoveryInProgress = true;
@@ -1152,8 +1446,10 @@ async function handleMessage(msg) {
   }
 
   const remoteJid = msg.key.remoteJid;
-  if (!remoteJid || remoteJid.endsWith("@g.us")) return; // לא קבוצות בגרסה הזו
+  if (!remoteJid) return;
   if (remoteJid === "status@broadcast") return;
+  // 👥 קבוצה — מסלול נפרד: האזנה בלבד (לוג לקובץ), בלי לענות בקבוצה
+  if (remoteJid.endsWith("@g.us")) return handleGroupMessage(msg);
 
   const fromMe = !!msg.key.fromMe;
   const meUser = jidUser(state.meJid);
@@ -1188,17 +1484,54 @@ async function handleMessage(msg) {
 
   // הוצאת טקסט ההודעה
   const m = msg.message;
-  const text =
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    "";
+  let text = extractText(m);
+  let isVoice = false;
+
+  // 🎤 הודעה קולית — אחרי כל בדיקות האבטחה (מתמללים רק את בעל/ת העסק, לא זרים)
+  if (!text && m.audioMessage) {
+    if (!voiceKey()) {
+      // בלי מפתח — מסבירים פעם בשעה, לא על כל הקלטה
+      if (Date.now() - lastNoKeyNotice > 60 * 60 * 1000) {
+        lastNoKeyNotice = Date.now();
+        await sendBotMessage(
+          remoteJid,
+          "🎤 קיבלתי הודעה קולית, אבל תמלול קולי עדיין לא מופעל. במסך העוזר ← הגדרות ← 🎤 הודעות קוליות — מדביקים מפתח OpenAI, ואז אני מבין גם הקלטות.",
+        );
+      }
+      return;
+    }
+    await presence(remoteJid, "recording");
+    try {
+      const { buf, mime } = await fetchAudio(msg);
+      const t = await transcribeAudio(buf, mime);
+      if (!t) {
+        await sendBotMessage(
+          remoteJid,
+          "🎤 לא הצלחתי להבין את ההקלטה. נסו שוב, או כתבו לי.",
+        );
+        return;
+      }
+      text = `[תמליל קולי]: ${t}`;
+      isVoice = true;
+      console.log(`[voice] ${remoteUser}: ${t.slice(0, 80)}`);
+    } catch (e) {
+      console.error("[voice] failed:", e.message);
+      state.stats.errors++;
+      state.lastError = voiceErrorHe(e.message);
+      await sendBotMessage(remoteJid, `🎤 ${voiceErrorHe(e.message)}`);
+      return;
+    }
+  }
 
   if (!text) return;
 
   state.stats.messagesIn++;
-  pushFeed({ dir: "in", from: remoteUser, text, selfChat: isSelfChat });
+  pushFeed({
+    dir: "in",
+    from: remoteUser,
+    text: isVoice ? `🎤 ${text}` : text,
+    selfChat: isSelfChat,
+  });
   console.log(
     `[in${isSelfChat ? "/self" : ""}] ${remoteUser}: ${text.slice(0, 80)}`,
   );
@@ -1363,6 +1696,9 @@ const server = http.createServer(async (req, res) => {
         botDonts: config.botDonts || "",
         welcomeMessage: config.welcomeMessage,
         welcomeSent: config.welcomeSent,
+        groups: Array.isArray(config.groups) ? config.groups : [],
+        groupsDir: groupsDir(),
+        voice: voicePublicInfo(),
       },
       feed: feed.slice(0, 20),
     };
@@ -1371,65 +1707,115 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // GET /check-claude — בדיקה אם CLI מותקן ומחובר
+  // GET /check-claude — שני שלבים: (1) claude מותקן? (2) עונה באמת? (מותקן ≠ מחובר לחשבון)
   if (req.method === "GET" && url.pathname === "/check-claude") {
     const claudeBin = process.env.CLAUDE_BIN || "claude";
-    const child = spawn(claudeBin, ["--version"], { env: { ...process.env } });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => (out += d.toString()));
-    child.stderr.on("data", (d) => (err += d.toString()));
-    child.on("error", (e) => {
+    const send = (obj) => {
       if (res.headersSent) return;
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(obj));
+    };
+    const run = (args, timeoutMs) =>
+      new Promise((resolve) => {
+        let out = "";
+        let err = "";
+        const child = spawn(claudeBin, args, {
+          cwd: process.env.HOME,
+          env: { ...process.env },
+        });
+        const t = setTimeout(() => {
+          try {
+            child.kill("SIGTERM");
+          } catch {}
+        }, timeoutMs);
+        child.stdout.on("data", (d) => (out += d.toString()));
+        child.stderr.on("data", (d) => (err += d.toString()));
+        child.on("error", (e) => {
+          clearTimeout(t);
+          resolve({ code: -1, out, err: e.message });
+        });
+        child.on("close", (code) => {
+          clearTimeout(t);
+          resolve({ code, out, err });
+        });
+      });
+    (async () => {
+      const v = await run(["--version"], 15000);
+      if (v.code !== 0) {
+        send({
           ok: false,
           installed: false,
-          error: e.message || "claude not found in PATH",
-        }),
+          works: false,
+          error:
+            v.code === -1
+              ? "Claude Code לא נמצא במחשב. מתקינים אותו, פותחים פעם אחת, ומנסים שוב."
+              : v.err.trim().slice(0, 160),
+        });
+        return;
+      }
+      const version = v.out.trim() || null;
+      const p = await run(
+        [
+          "-p",
+          "ענה במילה אחת בלבד: מוכן",
+          "--model",
+          "haiku",
+          "--output-format",
+          "json",
+        ],
+        90000,
       );
-    });
-    child.on("close", (code) => {
-      if (res.headersSent) return;
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: code === 0,
-          installed: code === 0,
-          version: out.trim() || null,
-          error: code !== 0 ? err.trim() : null,
-        }),
-      );
-    });
+      if (p.code !== 0) {
+        const why = (p.err.trim().split("\n").pop() || "").slice(0, 160);
+        const notLoggedIn =
+          /log ?in|auth|credential|not authenticated|api key|unauthorized/i.test(
+            p.err,
+          );
+        send({
+          ok: false,
+          installed: true,
+          works: false,
+          version,
+          error: notLoggedIn
+            ? "Claude Code מותקן אבל לא מחובר לחשבון. פותחים טרמינל, מריצים claude ומתחברים — ואז בודקים שוב."
+            : `Claude Code מותקן אבל לא ענה: ${why || "ללא פירוט"}`,
+        });
+        return;
+      }
+      send({ ok: true, installed: true, works: true, version });
+    })();
     return;
   }
 
   // POST /resend-welcome — שלח שוב את הודעת הברכה
   if (req.method === "POST" && url.pathname === "/resend-welcome") {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
     if (state.status !== "connected" || !state.meJid) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "not connected" }));
+      res.writeHead(400);
+      res.end(
+        JSON.stringify({ ok: false, error: "העוזר עדיין לא מחובר לוואטסאפ" }),
+      );
       return;
     }
     const targetJid = state.meLid || state.meJid;
-    providerSend(targetJid, config.welcomeMessage)
-      .then(() => {
-        config.welcomeSent = true;
-        saveConfig(config);
-        state.stats.messagesOut++;
-        pushFeed({
-          dir: "out",
-          to: jidUser(targetJid),
-          text: config.welcomeMessage,
-        });
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
-      })
-      .catch((e) => {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: e.message }));
-      });
+    sendBotMessage(targetJid, welcomeText()).then((sent) => {
+      if (!sent) {
+        res.writeHead(500);
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: state.lastError || "השליחה נכשלה",
+          }),
+        );
+        return;
+      }
+      config.welcomeSent = true;
+      saveConfig(config);
+      state.stats.messagesOut++;
+      pushFeed({ dir: "out", to: jidUser(targetJid), text: welcomeText() });
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+    });
     return;
   }
 
@@ -1474,6 +1860,28 @@ const server = http.createServer(async (req, res) => {
           }
           if (instanceId !== (cur.instanceId || "")) needsRestart = true;
           next.greenApi = { instanceId }; // רק המזהה הלא-סודי נשמר ב-config
+        }
+        // 👥 קבוצות — רשימה נקייה בלבד: מזהה קבוצה אמיתי + שם קצר
+        if (next.groups !== undefined) {
+          next.groups = (Array.isArray(next.groups) ? next.groups : [])
+            .map((g) => ({
+              id: String(g?.id || "").trim(),
+              name: String(g?.name || "").trim().slice(0, 80),
+            }))
+            .filter((g) => /^[\w.-]+@g\.us$/.test(g.id))
+            .slice(0, 200);
+        }
+        // 🎤 מפתח OpenAI (תמלול קולי) — ל-.env בלבד, כמו הטוקן של Green. ריק = לא לגעת בקיים.
+        if (next.openai && typeof next.openai === "object") {
+          const k = String(next.openai.key || "").trim();
+          if (next.openai.clear) {
+            setDotEnv("OPENAI_API_KEY", "");
+            console.log("[voice] מפתח OpenAI הוסר");
+          } else if (k) {
+            setDotEnv("OPENAI_API_KEY", k);
+            console.log("[voice] מפתח OpenAI נשמר ב-.env");
+          }
+          delete next.openai;
         }
         if (
           next.provider !== undefined &&
@@ -1568,6 +1976,72 @@ const server = http.createServer(async (req, res) => {
         });
         res.end(JSON.stringify({ ok: false, error: greenErrorHe(e.message) }));
       });
+    return;
+  }
+
+  // POST /green/reconnect — חיבור מחדש ל-Green בלי להתנתק (אחרי ניקוי webhook וכד')
+  if (req.method === "POST" && url.pathname === "/green/reconnect") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    if (!isGreen()) {
+      res.end(JSON.stringify({ ok: false, error: "העוזר לא מחובר דרך Green API" }));
+      return;
+    }
+    state.greenWebhookConflict = false;
+    state.status = "connecting";
+    state.lastError = null;
+    greenRestart(0);
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // POST /voice/check — בדיקת מפתח OpenAI (מהשדה, או השמור) בלי לשמור
+  if (req.method === "POST" && url.pathname === "/voice/check") {
+    let body = "";
+    req.on("data", (c) => (body += c.toString()));
+    req.on("end", async () => {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      try {
+        const p = JSON.parse(body || "{}");
+        const key = String(p.key || "").trim() || voiceKey();
+        if (!key) {
+          res.end(
+            JSON.stringify({ ok: false, error: "אין מפתח — מדביקים מפתח OpenAI" }),
+          );
+          return;
+        }
+        await voiceCheckKey(key);
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.end(JSON.stringify({ ok: false, error: voiceErrorHe(e.message) }));
+      }
+    });
+    return;
+  }
+
+  // POST /groups/list — רשימת הקבוצות של המספר המחובר (לבחירה במסך)
+  if (req.method === "POST" && url.pathname === "/groups/list") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    if (state.status !== "connected") {
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: "כדי לטעון קבוצות העוזר צריך להיות מחובר לוואטסאפ (מסך ראשי ← מחובר)",
+        }),
+      );
+      return;
+    }
+    listGroups()
+      .then((groups) => res.end(JSON.stringify({ ok: true, groups })))
+      .catch((e) =>
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: `לא הצלחתי לטעון קבוצות: ${
+              isGreen() ? greenErrorHe(e.message) : String(e.message).slice(0, 120)
+            }`,
+          }),
+        ),
+      );
     return;
   }
 

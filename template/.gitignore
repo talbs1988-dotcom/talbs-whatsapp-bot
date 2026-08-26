@@ -2,7 +2,10 @@ node_modules/
 auth/
 sessions.json
 feed.json
+green-seen.json
+logs/
 *.log
+.opened
 .DS_Store
 .env
 config.json

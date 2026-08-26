@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="app-build" content="2026.08.26-1" />
     <title>העוזר האישי שלי · טל בשור</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -515,6 +516,51 @@
         display: block;
       }
 
+      .live-badge {
+        font-size: 11px;
+        color: #1f7a3f;
+        background: #eaf7ee;
+        border-radius: 999px;
+        padding: 1px 8px;
+        margin-right: 6px;
+        font-weight: 500;
+        vertical-align: middle;
+      }
+      .groups-list {
+        display: none;
+        max-height: 260px;
+        overflow: auto;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: white;
+      }
+      .group-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 14px;
+        font-weight: 400;
+        color: var(--ink);
+        cursor: pointer;
+        margin: 0;
+      }
+      .group-row:last-child {
+        border-bottom: none;
+      }
+      .group-row input {
+        width: auto;
+        margin: 0;
+      }
+      .group-row.checked {
+        background: #fffbf1;
+      }
+      .check-result.warn {
+        background: #fff4e5;
+        color: #a65d00;
+      }
       .spinner {
         display: inline-block;
         width: 32px;
@@ -616,7 +662,7 @@
             </div>
             <textarea
               id="brainText"
-              placeholder="עדיין אין קובץ הנחיות. לחצי 'התחל מתבנית' או העלי קובץ — או פשוט כתבי כאן."
+              placeholder="עדיין אין קובץ הנחיות. לוחצים 'התחל מתבנית' או מעלים קובץ — או פשוט כותבים כאן."
               style="min-height: 220px; font-size: 13px; line-height: 1.6"
             ></textarea>
             <small
@@ -647,7 +693,7 @@
               <input
                 id="workdir"
                 readonly
-                placeholder="עדיין לא נבחרה — לחצי 'בחר תיקייה'"
+                placeholder="עדיין לא נבחרה — לוחצים 'בחר תיקייה'"
                 style="flex: 1; cursor: default"
               />
               <button
@@ -688,8 +734,8 @@
                 <div class="emoji">🟢</div>
                 <div class="title">כרום — חינמי</div>
                 <div class="desc">
-                  פעיל עכשיו. סריקת QR, רץ על המחשב שלך. חינם לגמרי (מתנתק
-                  לפעמים ומתחבר לבד).
+                  סריקת QR, רץ על המחשב שלך. חינם לגמרי (מתנתק לפעמים ומתחבר
+                  לבד).
                 </div>
               </div>
               <div class="mode-card" data-conn="green-api">
@@ -793,6 +839,126 @@
         </details>
 
         <details class="settings">
+          <summary>🎤 הודעות קוליות (אופציונלי)</summary>
+          <div class="body">
+            <p
+              style="
+                font-size: 13px;
+                color: var(--smoke);
+                margin: 0 0 10px;
+                line-height: 1.6;
+              "
+            >
+              רוצים לדבר עם העוזר במקום לכתוב? הוא מתמלל הקלטות דרך OpenAI
+              (Whisper) ועונה כרגיל. זה דורש מפתח OpenAI משלכם — העלות כ-2
+              אגורות לדקת הקלטה. המפתח נשמר רק במחשב הזה, בקובץ
+              <code>.env</code> — לא במסך ולא בקוד.
+            </p>
+            <label>מפתח OpenAI (מתחיל ב-sk-)</label>
+            <input
+              id="openaiKey"
+              type="password"
+              autocomplete="off"
+              placeholder="מדביקים כאן את המפתח"
+            />
+            <small
+              style="
+                color: var(--smoke);
+                font-size: 12px;
+                display: block;
+                margin-top: 6px;
+                line-height: 1.6;
+              "
+            >
+              איך משיגים: platform.openai.com ← API keys ← Create new secret
+              key. טוענים שם כמה דולרים של קרדיט (Billing). אחרי ההדבקה —
+              "שמירת הגדרות".
+            </small>
+            <div
+              style="
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                align-items: center;
+                margin-top: 12px;
+              "
+            >
+              <button class="btn btn-ghost" id="voice-check-btn" type="button">
+                🧪 בדיקת מפתח
+              </button>
+              <button
+                class="btn btn-ghost"
+                id="voice-clear-btn"
+                type="button"
+                style="display: none"
+              >
+                🗑 הסרת המפתח
+              </button>
+              <span
+                class="check-result"
+                id="voice-status"
+                style="display: none"
+              ></span>
+            </div>
+          </div>
+        </details>
+
+        <details class="settings">
+          <summary>👥 קבוצות — העוזר מאזין, לא כותב</summary>
+          <div class="body">
+            <p
+              style="
+                font-size: 13px;
+                color: var(--smoke);
+                margin: 0 0 10px;
+                line-height: 1.6;
+              "
+            >
+              בוחרים קבוצות שהעוזר יעקוב אחריהן. הוא שומר את ההודעות שלהן
+              לקובץ בתיקיית העבודה (תיקיית <code>קבוצות</code>), כדי שתוכלו
+              לשאול אותו בצ'אט הפרטי "מה היה היום בקבוצת הצוות?" או "מה
+              סיכמנו עם הלקוח?". <strong>העוזר לעולם לא כותב בקבוצה</strong> —
+              גם אם מבקשים ממנו. רוצים משהו מתוך קבוצה? כותבים בה
+              <code>עוזר, תסכם</code> — והתשובה מגיעה אליכם בצ'אט הפרטי, לא
+              לקבוצה.
+            </p>
+            <div
+              style="
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                flex-wrap: wrap;
+              "
+            >
+              <button class="btn btn-ghost" id="groups-load-btn" type="button">
+                🔄 טען את רשימת הקבוצות
+              </button>
+              <span
+                class="check-result"
+                id="groups-status"
+                style="display: none"
+              ></span>
+            </div>
+            <input
+              id="groups-search"
+              placeholder="🔍 חיפוש קבוצה לפי שם"
+              style="margin-top: 10px; display: none"
+            />
+            <div id="groups-list" class="groups-list"></div>
+            <small
+              id="groups-count"
+              style="
+                color: var(--smoke);
+                font-size: 12px;
+                display: block;
+                margin-top: 6px;
+              "
+              >עוד לא נבחרו קבוצות.</small
+            >
+          </div>
+        </details>
+
+        <details class="settings">
           <summary>💛 הודעת ברכה ראשונה</summary>
           <div class="body">
             <label>העוזר שולח את ההודעה הזו כשהוא נדלק לראשונה</label>
@@ -850,7 +1016,7 @@
 
             <div style="margin-top: 16px">
               <button class="btn btn-ghost" id="check-claude-btn">
-                🧪 בדוק חיבור ל-Claude
+                🧪 בדוק ש-Claude עונה
               </button>
               <span
                 class="check-result"
@@ -1015,6 +1181,7 @@
           <div class="stat">📥 <strong>${s.stats.messagesIn}</strong> נכנסו</div>
           <div class="stat">📤 <strong>${s.stats.messagesOut}</strong> יצאו</div>
           ${s.stats.errors ? `<div class="stat" style="color:var(--red);">⚠️ <strong>${s.stats.errors}</strong> שגיאות</div>` : ""}
+          ${s.config && s.config.groups && s.config.groups.length ? `<div class="stat">👥 מאזין ל-<strong>${s.config.groups.length}</strong> קבוצות</div>` : ""}
         </div>`;
         const usePolling = document.getElementById("use-polling-btn");
         if (usePolling) {
@@ -1072,8 +1239,13 @@
 
       // ----- שיחות: הצגה מלאה + מונה "לא נקראו" על הטאב -----
       let seenFeedCount = 0; // כמה הודעות כבר "נראו" בטאב השיחות
+      let feedSeenInit = false; // בטעינה ראשונה: היסטוריה ישנה לא נחשבת "לא נקרא"
       function updateUnread(feed) {
         const badge = document.getElementById("unread-badge");
+        if (!feedSeenInit) {
+          feedSeenInit = true;
+          seenFeedCount = (feed || []).length;
+        }
         const onChats = document
           .querySelector('.tab[data-tab="chats"]')
           .classList.contains("active");
@@ -1212,7 +1384,7 @@
           const back = await waitForRestart();
           if (!back) {
             renderError(
-              "העוזר לא חזר לעלות. אם הפעלתם אותו ידנית — להפעיל שוב (לחיצה כפולה על הבוט שלי.command).",
+              "העוזר לא חזר לעלות תוך דקה. אם הוא מותקן כשירות — הוא יעלה לבד בעוד רגע; אחרת לחיצה כפולה על start.command בתיקיית העוזר.",
             );
             return;
           }
@@ -1286,6 +1458,23 @@
         // דרך החיבור + פרטי Green API (ה-token עצמו לא מגיע למסך — רק "שמור/לא שמור")
         savedProvider = cfg.provider || "baileys";
         setConn(savedProvider);
+        // תג "פעיל" רק על דרך החיבור שבאמת שמורה (לא טקסט קבוע)
+        document
+          .querySelectorAll(".mode-card[data-conn] .live-badge")
+          .forEach((b) => b.remove());
+        const liveTitle = document.querySelector(
+          `.mode-card[data-conn="${savedProvider}"] .title`,
+        );
+        if (liveTitle)
+          liveTitle.insertAdjacentHTML(
+            "beforeend",
+            '<span class="live-badge">● פעיל עכשיו</span>',
+          );
+        renderVoice(cfg.voice);
+        selectedGroups = new Map(
+          (cfg.groups || []).map((g) => [g.id, g.name || g.id]),
+        );
+        renderGroups();
         const g = cfg.greenApi || {};
         document.getElementById("greenInstanceId").value = g.instanceId || "";
         document.getElementById("greenToken").placeholder = g.hasToken
@@ -1335,8 +1524,8 @@
           setStatusBadge("מתחבר מחדש...", "");
           renderReconnecting("מתחבר מחדש...");
         } else if (s.status === "logged-out") {
-          setStatusBadge("הוצאת חיבור", "error");
-          renderReconnecting("הוצאת חיבור — מכין QR חדש...");
+          setStatusBadge("החיבור נותק", "error");
+          renderReconnecting("החיבור לוואטסאפ נותק — מכין QR חדש לסריקה...");
         } else if (s.status === "connecting") {
           setStatusBadge("מתחבר ל-Green API...", "");
           renderReconnecting(s.lastError || "מתחבר ל-Green API...");
@@ -1357,7 +1546,19 @@
         <div class="send-test" style="background:#fff4e5; border:1px solid #f5c26b; margin-top:14px;">
           <p>${(s.lastError || "").replace(/</g, "&lt;")}</p>
         </div>
-        <button class="btn btn-ghost" style="margin-top:14px" onclick="document.getElementById('reset-btn').click()">🔄 ניקיתי — התחבר מחדש</button>`;
+        <button class="btn btn-ghost" style="margin-top:14px" id="green-reconnect-btn">🔄 ניקיתי — נסה להתחבר שוב</button>`;
+          document.getElementById("green-reconnect-btn").onclick = async (ev) => {
+            ev.target.disabled = true;
+            ev.target.textContent = "מתחבר...";
+            try {
+              const j = await (
+                await fetch("/green/reconnect", { method: "POST" })
+              ).json();
+              if (!j.ok) alert("לא הצליח: " + (j.error || "שגיאה"));
+            } catch (e) {
+              alert("לא הצליח: " + e.message);
+            }
+          };
         } else if (s.status === "green-setup") {
           setStatusBadge("צריך פרטי Green API", "error");
           renderGreenSetup(s);
@@ -1395,6 +1596,16 @@
               next.greenApi = { instanceId, token: String(gt || "").trim() };
             }
           }
+          // 🎤 מפתח OpenAI: ריק = לא לגעת בקיים. נשמר ב-.env בלבד.
+          {
+            const k = (document.getElementById("openaiKey").value || "").trim();
+            if (k) next.openai = { key: k };
+          }
+          // 👥 קבוצות שנבחרו
+          next.groups = Array.from(selectedGroups, ([id, name]) => ({
+            id,
+            name,
+          }));
           // קובץ ההנחיות נשמר בנפרד — לתיקיית העבודה (לא ל-config)
           fetch("/brain", {
             method: "POST",
@@ -1427,6 +1638,9 @@
             // אבטחה: הטוקן נשמר ב-.env — לא משאירים אותו גלוי בשדה על המסך
             const tokField = document.getElementById("greenToken");
             if (tokField) tokField.value = "";
+            document.getElementById("openaiKey").value = "";
+            updateGroupsCount(true);
+            fetchState().then((st) => st && renderVoice(st.config.voice));
             if (next.agentName) {
               document.getElementById("agent-title").textContent =
                 next.agentName + " ✨";
@@ -1445,6 +1659,9 @@
             )
           )
             return;
+          try {
+            localStorage.setItem("talbs-bot-tab", "home"); // ה-QR החדש מוצג בראשי
+          } catch {}
           await fetch("/reset", { method: "POST" });
           setTimeout(() => location.reload(), 2000);
         });
@@ -1469,7 +1686,9 @@
               if (b && b.ok)
                 document.getElementById("brainText").value = b.text || "";
             } else if (!j.cancelled) {
-              alert("לא הצלחתי לפתוח את חלון הבחירה. אפשר להקליד נתיב ידנית.");
+              alert(
+                "לא הצלחתי לפתוח את חלון הבחירה. אפשר ללחוץ 'צור תיקייה חדשה' — היא תיווצר על שולחן העבודה ותיבחר לבד.",
+              );
             }
           } catch {
             alert("שגיאה בפתיחת החלון.");
@@ -1541,7 +1760,7 @@
           const st = document.getElementById("brain-status");
           st.style.display = "inline-block";
           st.className = "check-result ok";
-          st.textContent = `✓ נטען: ${f.name} — לחצי "שמירת הגדרות"`;
+          st.textContent = `✓ נטען: ${f.name} — לוחצים "שמירת הגדרות"`;
           ev.target.value = "";
         });
 
@@ -1585,16 +1804,19 @@
           const result = document.getElementById("claude-check-result");
           result.style.display = "inline-block";
           result.className = "check-result";
-          result.textContent = "בודק...";
+          result.textContent = "בודק... (שולח שאלת בדיקה ל-Claude, עד דקה)";
           try {
             const r = await fetch("/check-claude");
             const j = await r.json();
             if (j.ok) {
               result.className = "check-result ok";
-              result.textContent = `✅ Claude מותקן (${j.version || "OK"})`;
+              result.textContent = `✅ Claude מותקן ועונה (${j.version || "OK"})`;
+            } else if (j.installed) {
+              result.className = "check-result warn";
+              result.textContent = `⚠️ ${j.error || "Claude מותקן אבל לא ענה"}`;
             } else {
               result.className = "check-result fail";
-              result.textContent = `❌ לא מותקן — ${j.error || "claude לא נמצא ב-PATH"}`;
+              result.textContent = `❌ ${j.error || "Claude Code לא נמצא במחשב"}`;
             }
           } catch (e) {
             result.className = "check-result fail";
@@ -1629,6 +1851,150 @@
           } catch (e) {
             status.className = "check-result fail";
             status.textContent = "❌ " + e.message;
+          }
+        });
+
+      // ----- 🎤 הודעות קוליות -----
+      function renderVoice(v) {
+        const st = document.getElementById("voice-status");
+        const clr = document.getElementById("voice-clear-btn");
+        const inp = document.getElementById("openaiKey");
+        if (v && v.hasKey) {
+          inp.placeholder = "•••••••• שמור — מדביקים חדש רק כדי להחליף";
+          clr.style.display = "inline-flex";
+          st.style.display = "inline-block";
+          st.className = "check-result ok";
+          st.textContent = "✓ מפתח שמור — הודעות קוליות פעילות";
+        } else {
+          inp.placeholder = "מדביקים כאן את המפתח";
+          clr.style.display = "none";
+          st.style.display = "none";
+        }
+      }
+      document
+        .getElementById("voice-check-btn")
+        .addEventListener("click", async () => {
+          const st = document.getElementById("voice-status");
+          st.style.display = "inline-block";
+          st.className = "check-result";
+          st.textContent = "בודק מול OpenAI...";
+          try {
+            const j = await (
+              await fetch("/voice/check", {
+                method: "POST",
+                body: JSON.stringify({
+                  key: document.getElementById("openaiKey").value.trim(),
+                }),
+              })
+            ).json();
+            st.className = j.ok ? "check-result ok" : "check-result fail";
+            st.textContent = j.ok
+              ? '✅ המפתח תקין — לוחצים "שמירת הגדרות"'
+              : "❌ " + (j.error || "שגיאה");
+          } catch (e) {
+            st.className = "check-result fail";
+            st.textContent = "❌ " + e.message;
+          }
+        });
+      document
+        .getElementById("voice-clear-btn")
+        .addEventListener("click", async () => {
+          if (!confirm("להסיר את מפתח OpenAI? הודעות קוליות יפסיקו להיות מתומללות."))
+            return;
+          const r = await fetch("/config", {
+            method: "POST",
+            body: JSON.stringify({ openai: { clear: true } }),
+          });
+          if (r.ok) renderVoice({ hasKey: false });
+          else alert("לא הצלחתי להסיר — נסו לרענן את הדף.");
+        });
+
+      // ----- 👥 קבוצות -----
+      let allGroups = []; // מהוואטסאפ (אחרי "טען")
+      let selectedGroups = new Map(); // id → name (מה ששמור/נבחר)
+      function escHtml(x) {
+        return String(x)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/"/g, "&quot;");
+      }
+      function updateGroupsCount(saved) {
+        const nSel = selectedGroups.size;
+        document.getElementById("groups-count").textContent = nSel
+          ? saved
+            ? `✓ נשמר — העוזר מאזין ל-${nSel} קבוצות.`
+            : `נבחרו ${nSel} קבוצות — לוחצים "שמירת הגדרות" כדי שהעוזר יתחיל להאזין.`
+          : "עוד לא נבחרו קבוצות.";
+      }
+      function renderGroups() {
+        const q = (document.getElementById("groups-search").value || "")
+          .trim()
+          .toLowerCase();
+        const list = document.getElementById("groups-list");
+        const known = new Map(allGroups.map((g) => [g.id, g.name]));
+        selectedGroups.forEach((name, id) => {
+          if (!known.has(id)) known.set(id, name);
+        });
+        const rows = Array.from(known, ([id, name]) => ({ id, name }))
+          .filter((g) => !q || String(g.name).toLowerCase().includes(q))
+          .sort(
+            (a, b) =>
+              (selectedGroups.has(b.id) ? 1 : 0) -
+                (selectedGroups.has(a.id) ? 1 : 0) ||
+              String(a.name).localeCompare(String(b.name), "he"),
+          );
+        list.style.display = rows.length ? "block" : "none";
+        list.innerHTML = rows
+          .map(
+            (g) =>
+              `<label class="group-row${selectedGroups.has(g.id) ? " checked" : ""}"><input type="checkbox" data-id="${escHtml(g.id)}" ${selectedGroups.has(g.id) ? "checked" : ""}/> <span>${escHtml(g.name)}</span></label>`,
+          )
+          .join("");
+        list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+          cb.addEventListener("change", () => {
+            const id = cb.dataset.id;
+            if (cb.checked) selectedGroups.set(id, known.get(id) || id);
+            else selectedGroups.delete(id);
+            cb.closest(".group-row").classList.toggle("checked", cb.checked);
+            updateGroupsCount(false);
+          });
+        });
+        updateGroupsCount(false);
+      }
+      document
+        .getElementById("groups-search")
+        .addEventListener("input", renderGroups);
+      document
+        .getElementById("groups-load-btn")
+        .addEventListener("click", async () => {
+          const st = document.getElementById("groups-status");
+          const btn = document.getElementById("groups-load-btn");
+          st.style.display = "inline-block";
+          st.className = "check-result";
+          st.textContent = "טוען קבוצות מהוואטסאפ...";
+          btn.disabled = true;
+          try {
+            const j = await (
+              await fetch("/groups/list", { method: "POST" })
+            ).json();
+            if (j.ok) {
+              allGroups = j.groups || [];
+              document.getElementById("groups-search").style.display =
+                allGroups.length > 6 ? "block" : "none";
+              st.className = "check-result ok";
+              st.textContent = allGroups.length
+                ? `✓ נטענו ${allGroups.length} קבוצות — מסמנים את מה שרוצים`
+                : "לא נמצאו קבוצות במספר הזה";
+              renderGroups();
+            } else {
+              st.className = "check-result fail";
+              st.textContent = "❌ " + (j.error || "שגיאה");
+            }
+          } catch (e) {
+            st.className = "check-result fail";
+            st.textContent = "❌ " + e.message;
+          } finally {
+            btn.disabled = false;
           }
         });
 

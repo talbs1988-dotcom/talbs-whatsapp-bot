@@ -1,7 +1,7 @@
 {
   "name": "talbs-whatsapp-bot",
   "version": "1.0.0",
-  "description": "WhatsApp bot for Tal Bsore's workshop participants — self-chat works out of the box",
+  "description": "העוזר האישי — WhatsApp assistant connected to your own Claude Code · Tal Bsore",
   "type": "module",
   "main": "bot.js",
   "scripts": {
@@ -12,5 +12,8 @@
     "@hapi/boom": "^10.0.1",
     "pino": "^9.5.0",
     "qrcode": "^1.5.4"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
