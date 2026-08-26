@@ -5,9 +5,10 @@
 # כך כשל בהורדה/ברשת משאיר את מה שהיה מותקן רץ כרגיל.
 set -e
 
-BOT_DIR="$HOME/talbs-whatsapp-bot"
-PORT=7655
-LABEL="com.talbs.workshop-bot"
+# לבדיקות בלבד אפשר לעקוף (ASSISTANT_DIR/PORT/LABEL) — אצל תלמידים תמיד ברירות המחדל
+BOT_DIR="${ASSISTANT_DIR:-$HOME/talbs-whatsapp-bot}"
+PORT="${ASSISTANT_PORT:-7655}"
+LABEL="${ASSISTANT_LABEL:-com.talbs.workshop-bot}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$BOT_DIR/logs"
 LOG="$LOG_DIR/assistant.log"
@@ -165,6 +166,8 @@ cat > "$PLIST" <<EOF
     <dict>
         <key>PATH</key>
         <string>$BOT_PATH</string>
+        <key>ASSISTANT_PORT</key>
+        <string>$PORT</string>
 $CLAUDE_ENV
     </dict>
 </dict>

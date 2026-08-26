@@ -31,7 +31,8 @@ const CONFIG_PATH = path.join(__dirname, "config.json");
 const SESSIONS_PATH = path.join(__dirname, "sessions.json");
 const FEED_PATH = path.join(__dirname, "feed.json");
 const AUTH_DIR = path.join(__dirname, "auth");
-const PORT = 7655;
+// לבדיקות בלבד: התקנה מקבילה על פורט אחר. אצל תלמידים תמיד 7655.
+const PORT = Number(process.env.ASSISTANT_PORT) || 7655;
 
 // ----- אבטחה: רק המסך של העוזר עצמו יכול לשנות אותו -----
 // העוזר רץ על המחשב ומקבל פקודות מהדפדפן. בלי הגנה, כל אתר שפתוח בדפדפן
