@@ -18,7 +18,10 @@ STAGE="$STAGE_ROOT/talbs-whatsapp-bot-main"
 
 # ---------- 0) בדיקות מקדימות — לפני שנוגעים בכלום ----------
 if [ "$(uname -s)" != "Darwin" ]; then
-  echo "⚠️ פקודת ההתקנה הזו היא למק. ב-Windows מתקינים לפי ההוראות בקורס (בקרוב מתקין ייעודי)."
+  echo "⚠️ הפקודה הזו היא למק. ב-Windows יש מתקין משלו — לפתוח PowerShell ולהריץ:"
+  echo ""
+  echo "   irm https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/main/template/install.ps1 | iex"
+  echo ""
   exit 1
 fi
 if ! command -v node >/dev/null 2>&1; then

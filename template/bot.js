@@ -517,6 +517,10 @@ function askClaude(userJid, text, opts = {}) {
     const child = spawn(claudeBin, args, {
       cwd,
       env: childEnv(),
+      // Windows: claude מותקן כ-claude.cmd, ו-spawn לא מריץ .cmd בלי shell
+      shell: process.platform === "win32",
+      // בלי זה Claude מחכה ל-stdin שלא מגיע, ונופל אחרי 3 שניות
+      stdio: ["ignore", "pipe", "pipe"],
     });
     // בלי זה: claude שלא נמצא (ENOENT) = unhandled error = העוזר כולו קורס על כל הודעה
     child.on("error", (e) => {
@@ -2039,8 +2043,10 @@ const server = http.createServer(async (req, res) => {
         let out = "";
         let err = "";
         const child = spawn(claudeBin, args, {
-          cwd: process.env.HOME,
+          cwd: process.env.HOME || process.env.USERPROFILE,
           env: childEnv(),
+          shell: process.platform === "win32",
+          stdio: ["ignore", "pipe", "pipe"],
         });
         const t = setTimeout(() => {
           try {
