@@ -107,10 +107,8 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not (Test-Path $Log)) { New-Item -ItemType File -Force -Path $Log | Out-Null }
 New-Item -ItemType File -Force -Path (Join-Path $BotDir ".opened") | Out-Null
 
-# פרטיות: התיקייה רק למשתמש הזה (מחשב משפחתי/משרדי)
-try {
-  icacls $BotDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" /T /C /Q | Out-Null
-} catch { Write-Host "⚠️ לא הצלחתי להגביל הרשאות על התיקייה — לא חוסם." }
+# הערה: לא משנים הרשאות NTFS. תיקייה תחת פרופיל המשתמש היא ממילא פרטית לו,
+# ו-icacls /inheritance:r עלול לנעול את המשתמש מחוץ לתיקייה של עצמו אם משהו משתבש.
 
 Push-Location $BotDir
 if (Test-Path (Join-Path $BotDir "package.json")) {
