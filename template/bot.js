@@ -62,7 +62,6 @@ const ENV_PATH = path.join(__dirname, ".env");
 const ENV_ALLOWED = new Set([
   "GREEN_API_TOKEN",
   "GREEN_API_INSTANCE_ID",
-  "OPENAI_API_KEY",
 ]);
 function loadDotEnv() {
   try {
@@ -686,78 +685,31 @@ function extractText(m) {
   );
 }
 
-// ----- 🎤 הודעות קוליות — תמלול דרך OpenAI (Whisper). אופציונלי. המפתח ב-.env בלבד -----
-const VOICE_MODEL = "whisper-1";
-let lastNoKeyNotice = 0; // מתי הסברנו לאחרונה שאין מפתח (לא על כל הקלטה)
-function voiceKey() {
-  return String(process.env.OPENAI_API_KEY || "").trim();
-}
+// ----- 🎤 הודעות קוליות — תמלול מקומי. בלי מפתח, בלי עלות, לא יוצא מהמחשב -----
+import { transcribeBuffer, selfTest as voiceSelfTest, VOICE_MODEL } from "./voice.js";
+
+// התמלול תמיד זמין — אין מפתח להגדיר ואין מה שיכול לפוג
 function voicePublicInfo() {
-  return { hasKey: !!voiceKey(), model: VOICE_MODEL };
+  return { ready: true, engine: "local", model: VOICE_MODEL, needsKey: false };
 }
-function openaiBase() {
-  // לבדיקות בלבד (שרת מדומה מקומי). לא מוגדר אצל תלמידים.
-  return (process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(
-    /\/$/,
-    "",
-  );
-}
-async function voiceCheckKey(key) {
-  const r = await fetch(`${openaiBase()}/v1/models/${VOICE_MODEL}`, {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!r.ok)
-    throw new Error(
-      `openai → HTTP ${r.status}: ${(await r.text()).slice(0, 160)}`,
-    );
-  return true;
-}
+
 function voiceErrorHe(msg) {
   const m = String(msg || "");
-  if (/no-key/.test(m))
-    return "אין מפתח OpenAI. מדביקים אותו בהגדרות ← הודעות קוליות.";
-  if (/HTTP 401/.test(m))
-    return "OpenAI דחה את המפתח — בודקים שהמפתח הודבק נכון (מתחיל ב-sk-).";
-  if (/HTTP 429|insufficient_quota/.test(m))
-    return "OpenAI: אין יתרה בחשבון (או חריגה מהמכסה). טוענים קרדיט ב-platform.openai.com.";
-  if (/HTTP 413|too large/i.test(m))
-    return "ההקלטה גדולה מדי לתמלול (המגבלה 25MB).";
-  if (/TimeoutError|aborted due to timeout/i.test(m))
-    return "ההקלטה ארוכה מדי לתמלול — נסו הקלטה קצרה יותר (עד כ-10 דקות).";
-  if (/abort|timeout|fetch failed|ENOTFOUND|ECONN/i.test(m))
-    return "אין תקשורת עם OpenAI — בודקים חיבור לאינטרנט.";
+  if (/too-short/.test(m))
+    return "ההקלטה קצרה מדי. נסו הקלטה של שנייה ומעלה.";
+  if (/empty-result/.test(m))
+    return "לא זיהיתי דיבור בהקלטה. נסו להקליט שוב, קרוב יותר למיקרופון.";
+  if (/ENOSPC|no space/i.test(m))
+    return "אין מקום בדיסק לתמלול. מפנים מקום ומנסים שוב.";
+  if (/ffmpeg/i.test(m))
+    return "לא הצלחתי לקרוא את ההקלטה. נסו להקליט שוב.";
+  if (/fetch failed|ENOTFOUND|ECONN|getaddrinfo/i.test(m))
+    return "מנוע התמלול צריך הורדה חד-פעמית ואין חיבור לאינטרנט. מתחברים ומנסים שוב.";
   return `התמלול נכשל: ${m.slice(0, 120)}`;
 }
+
 async function transcribeAudio(buf, mime) {
-  const key = voiceKey();
-  if (!key) throw new Error("no-key");
-  const mt = String(mime || "audio/ogg").split(";")[0].trim() || "audio/ogg";
-  const ext = /mp4|m4a/.test(mt)
-    ? "m4a"
-    : /mpeg|mp3/.test(mt)
-      ? "mp3"
-      : /wav/.test(mt)
-        ? "wav"
-        : /webm/.test(mt)
-          ? "webm"
-          : "ogg";
-  const form = new FormData();
-  form.append("file", new Blob([buf], { type: mt }), `voice.${ext}`);
-  form.append("model", VOICE_MODEL);
-  const r = await fetch(`${openaiBase()}/v1/audio/transcriptions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
-    signal: AbortSignal.timeout(120000),
-  });
-  const text = await r.text();
-  if (!r.ok) throw new Error(`openai → HTTP ${r.status}: ${text.slice(0, 160)}`);
-  try {
-    return String(JSON.parse(text).text || "").trim();
-  } catch {
-    return "";
-  }
+  return transcribeBuffer(buf, mime);
 }
 // מוריד את קובץ הקול מהספק הפעיל (Green: קישור הורדה · כרום: דרך Baileys)
 async function fetchAudio(msg) {
@@ -1772,17 +1724,6 @@ async function handleMessage(msg) {
 
   // 🎤 הודעה קולית — אחרי כל בדיקות האבטחה (מתמללים רק את בעל/ת העסק, לא זרים)
   if (!text && m.audioMessage) {
-    if (!voiceKey()) {
-      // בלי מפתח — מסבירים פעם בשעה, לא על כל הקלטה
-      if (Date.now() - lastNoKeyNotice > 60 * 60 * 1000) {
-        lastNoKeyNotice = Date.now();
-        await sendBotMessage(
-          remoteJid,
-          "🎤 קיבלתי הודעה קולית, אבל תמלול קולי עדיין לא מופעל. במסך העוזר ← הגדרות ← 🎤 הודעות קוליות — מדביקים מפתח OpenAI, ואז אני מבין גם הקלטות.",
-        );
-      }
-      return;
-    }
     await presence(remoteJid, "recording");
     try {
       const { buf, mime } = await fetchAudio(msg);
@@ -2209,18 +2150,8 @@ const server = http.createServer(async (req, res) => {
             }
           }
         }
-        // 🎤 מפתח OpenAI (תמלול קולי) — ל-.env בלבד, כמו הטוקן של Green. ריק = לא לגעת בקיים.
-        if (next.openai && typeof next.openai === "object") {
-          const k = String(next.openai.key || "").trim();
-          if (next.openai.clear) {
-            setDotEnv("OPENAI_API_KEY", "");
-            console.log("[voice] מפתח OpenAI הוסר");
-          } else if (k) {
-            setDotEnv("OPENAI_API_KEY", k);
-            console.log("[voice] מפתח OpenAI נשמר ב-.env");
-          }
-          delete next.openai;
-        }
+        // 🎤 התמלול מקומי — אין מפתח לשמור. מתעלמים מהשדה אם הגיע ממסך ישן.
+        if (next.openai !== undefined) delete next.openai;
         if (
           next.provider !== undefined &&
           !["baileys", "green-api"].includes(next.provider)
@@ -2356,27 +2287,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /voice/check — בדיקת מפתח OpenAI (מהשדה, או השמור) בלי לשמור
+  // POST /voice/check — בדיקה אמיתית: מתמלל הקלטה מצורפת ומחזיר את התמליל.
+  // לא בודק "האם ההגדרה קיימת" אלא האם התמלול בפועל עובד.
   if (req.method === "POST" && url.pathname === "/voice/check") {
-    let body = "";
-    req.on("data", (c) => (body += c.toString()));
-    req.on("end", async () => {
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      try {
-        const p = JSON.parse(body || "{}");
-        const key = String(p.key || "").trim() || voiceKey();
-        if (!key) {
-          res.end(
-            JSON.stringify({ ok: false, error: "אין מפתח — מדביקים מפתח OpenAI" }),
-          );
-          return;
-        }
-        await voiceCheckKey(key);
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        res.end(JSON.stringify({ ok: false, error: voiceErrorHe(e.message) }));
-      }
-    });
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    try {
+      const t0 = Date.now();
+      const text = await voiceSelfTest();
+      res.end(
+        JSON.stringify({
+          ok: true,
+          text,
+          seconds: Math.round((Date.now() - t0) / 100) / 10,
+        }),
+      );
+    } catch (e) {
+      res.end(JSON.stringify({ ok: false, error: voiceErrorHe(e.message) }));
+    }
     return;
   }
 

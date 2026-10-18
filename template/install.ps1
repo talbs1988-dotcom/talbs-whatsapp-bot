@@ -114,6 +114,23 @@ Push-Location $BotDir
 if (Test-Path (Join-Path $BotDir "package.json")) {
   Write-Host "📦 מתקין תלויות..."
   & npm install --silent 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "⚠️ התקנת התלויות נכשלה — בודקים חיבור לאינטרנט ומריצים שוב." -ForegroundColor Yellow
+    Pop-Location
+    exit 1
+  }
+
+  # 🎤 ffmpeg (להמרת הקלטות קוליות). אמור לבוא עם ההתקנה; אם לא — מורידים במפורש.
+  $ff = Join-Path $BotDir "node_modules\ffmpeg-static\ffmpeg.exe"
+  if (-not (Test-Path $ff)) {
+    Write-Host "🎤 מוריד את ממיר ההקלטות..."
+    & node (Join-Path $BotDir "node_modules\ffmpeg-static\install.js")
+  }
+  if (-not (Test-Path $ff)) {
+    Write-Host "⚠️ ממיר ההקלטות לא נמצא — תמלול קולי לא יהיה זמין. שאר העוזר כן." -ForegroundColor Yellow
+  } else {
+    Write-Host "✅ תמלול הקלטות קוליות מוכן"
+  }
 }
 Pop-Location
 

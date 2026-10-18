@@ -61,6 +61,16 @@ if ! (cd "$STAGE/template" && npm install --ignore-scripts --no-fund --no-audit 
   exit 1
 fi
 
+# 🎤 ffmpeg (להמרת הקלטות קוליות) מגיע דרך סקריפט התקנה, ו---ignore-scripts
+# חוסם אותו. מורידים אותו במפורש — פקודה אחת ומוכרת, לא הרצה של מה שיזדמן.
+echo "🎤 מוריד את ממיר ההקלטות..."
+if ! (cd "$STAGE/template" && node node_modules/ffmpeg-static/install.js); then
+  echo "⚠️ הורדת ממיר ההקלטות נכשלה — התמלול הקולי לא יעבוד. שאר העוזר כן."
+fi
+if [ ! -s "$STAGE/template/node_modules/ffmpeg-static/ffmpeg" ]; then
+  echo "⚠️ ממיר ההקלטות לא נמצא לאחר ההורדה — תמלול קולי לא יהיה זמין."
+fi
+
 # מכאן והלאה נוגעים בהתקנה הקיימת. אם משהו נכשל — מחזירים את השירות הקודם לעבודה.
 restore_old_service() {
   [ -f "$PLIST" ] && launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || true
