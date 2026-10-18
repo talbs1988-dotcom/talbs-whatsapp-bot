@@ -129,7 +129,15 @@ if (Test-Path (Join-Path $BotDir "package.json")) {
   if (-not (Test-Path $ff)) {
     Write-Host "⚠️ ממיר ההקלטות לא נמצא — תמלול קולי לא יהיה זמין. שאר העוזר כן." -ForegroundColor Yellow
   } else {
-    Write-Host "✅ תמלול הקלטות קוליות מוכן"
+    # 🎤 מורידים את מנוע התמלול כבר עכשיו (כ-1 ג'יגה, פעם אחת). אחרת ההקלטה
+    # הראשונה הייתה לוקחת דקה ויותר והמשתמש היה חושב שהעוזר תקוע.
+    Write-Host "🎤 מוריד את מנוע התמלול (כ-1 ג'יגה, פעם אחת בלבד)..."
+    & node -e "import('./voice.js').then(v=>v.selfTest()).then(t=>console.log('   OK: '+t)).catch(e=>{console.log('   '+e.message);process.exit(1)})"
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "✅ תמלול הקלטות קוליות מוכן ונבדק"
+    } else {
+      Write-Host "⚠️ לא הצלחתי להוריד עכשיו. ההקלטה הראשונה תיקח יותר זמן, ואז זה יסתדר." -ForegroundColor Yellow
+    }
   }
 }
 Pop-Location

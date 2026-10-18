@@ -71,6 +71,21 @@ if [ ! -s "$STAGE/template/node_modules/ffmpeg-static/ffmpeg" ]; then
   echo "⚠️ ממיר ההקלטות לא נמצא לאחר ההורדה — תמלול קולי לא יהיה זמין."
 fi
 
+# 🎤 מורידים את מנוע התמלול כבר עכשיו (כ-1 ג'יגה, פעם אחת). אחרת ההקלטה
+# הראשונה של המשתמש הייתה לוקחת דקה ויותר, והוא היה חושב שהעוזר תקוע.
+# כישלון כאן לא עוצר את ההתקנה — הקול פשוט יהיה אטי בפעם הראשונה.
+echo "🎤 מוריד את מנוע התמלול (כ-1 ג'יגה, פעם אחת בלבד)..."
+if (cd "$STAGE/template" && node -e '
+import("./voice.js")
+  .then((v) => v.selfTest())
+  .then((t) => console.log("   ✅ תמלול נבדק: " + t))
+  .catch((e) => { console.log("   ⚠️ " + e.message); process.exit(1); })
+' 2>/dev/null); then
+  :
+else
+  echo "   ⚠️ לא הצלחתי להוריד עכשיו. ההקלטה הראשונה תיקח יותר זמן, ואז זה יסתדר."
+fi
+
 # מכאן והלאה נוגעים בהתקנה הקיימת. אם משהו נכשל — מחזירים את השירות הקודם לעבודה.
 restore_old_service() {
   [ -f "$PLIST" ] && launchctl bootstrap "gui/$UID_" "$PLIST" 2>/dev/null || true
