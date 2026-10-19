@@ -156,10 +156,28 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
   -Settings $settings -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-# ---------- 4b) קיצור דרך על שולחן העבודה ----------
+# ---------- 4b) מפתח המסך ----------
+# העוזר יוצר .ui-key בעלייה. בלי המפתח בכתובת השרת מגיש מסך נעול ולא את
+# הברקוד — ולכן גם הדפדפן וגם הקיצור דרך חייבים לכלול אותו.
+$UiKey = ""
+for ($i = 0; $i -lt 30; $i++) {
+  $kp = Join-Path $BotDir ".ui-key"
+  if (Test-Path $kp) {
+    $UiKey = (Get-Content $kp -Raw).Trim()
+    if ($UiKey) { break }
+  }
+  Start-Sleep -Seconds 1
+}
+if (-not $UiKey) {
+  Write-Host "⚠️ מפתח המסך לא נוצר — המסך לא ייפתח לבד. נסו להריץ את ההתקנה שוב." -ForegroundColor Yellow
+}
+
+$UiUrl = if ($UiKey) { "http://127.0.0.1:$Port/?key=$UiKey" } else { "http://127.0.0.1:$Port" }
+
+# ---------- 4c) קיצור דרך על שולחן העבודה ----------
 try {
   $lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "העוזר האישי.url"
-  "[InternetShortcut]`r`nURL=http://127.0.0.1:$Port`r`n" | Set-Content -Path $lnk -Encoding ASCII
+  "[InternetShortcut]`r`nURL=$UiUrl`r`n" | Set-Content -Path $lnk -Encoding ASCII
 } catch { }
 
 # ---------- 5) אימות אמיתי: המסך שמוגש הוא הגרסה שירדה ----------
@@ -168,7 +186,9 @@ $ok = $false
 for ($i = 0; $i -lt 30; $i++) {
   Start-Sleep -Seconds 2
   try {
-    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port" -UseBasicParsing -TimeoutSec 3
+    $hdr = @{}
+    if ($UiKey) { $hdr["Cookie"] = "ui=$UiKey" }
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port" -Headers $hdr -UseBasicParsing -TimeoutSec 3
     if ($r.StatusCode -eq 200) {
       if (-not $BuildTag -or $r.Content -match [Regex]::Escape($BuildTag)) { $ok = $true; break }
     }
@@ -181,12 +201,12 @@ if ($ok) {
   Write-Host "✅ הוא יעלה אוטומטית גם אחרי הפעלה מחדש של המחשב."
   Write-Host "✅ אם יקרוס — יחזור לבד."
   Write-Host ""
-  Write-Host "   נפתח כעת המסך לחיבור וואטסאפ: http://127.0.0.1:$Port"
-  Start-Process "http://127.0.0.1:$Port"
+  Write-Host "   נפתח כעת המסך לחיבור וואטסאפ — שם סורקים את הברקוד."
+  Start-Process $UiUrl
 } else {
   Write-Host "⚠️ ההתקנה הסתיימה, אבל העוזר לא ענה בזמן." -ForegroundColor Yellow
   Write-Host "   מה לעשות:"
-  Write-Host "   1) לפתוח:  http://127.0.0.1:$Port"
+  Write-Host "   1) ללחוץ על האייקון 'העוזר האישי' על שולחן העבודה"
   Write-Host "   2) אם לא נפתח — להריץ ידנית ולראות את השגיאה:"
   Write-Host "      cd `"$BotDir`" ; node bot.js"
   Write-Host "   3) לוג:  $Log"
