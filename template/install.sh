@@ -37,12 +37,6 @@ if ! command -v node >/dev/null 2>&1; then
   echo "⚠️ Node.js לא מותקן במחשב. מתקינים מ-https://nodejs.org (הגרסה המסומנת LTS), סוגרים ופותחים מחדש את הטרמינל, ומריצים את פקודת ההתקנה שוב."
   exit 1
 fi
-if command -v node >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1 \
-   && [ ! -x "$HOME/.local/bin/claude" ]; then
-  echo "📦 Claude Code לא מותקן — מתקין אותו עכשיו..."
-  npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
-  hash -r 2>/dev/null || true
-fi
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
 if [ "$NODE_MAJOR" -lt 18 ]; then
   echo "⚠️ גרסת Node.js ישנה מדי ($(node -v)). צריך 18 ומעלה — מעדכנים מ-https://nodejs.org ומריצים שוב."
@@ -86,20 +80,6 @@ if [ ! -s "$STAGE/template/node_modules/ffmpeg-static/ffmpeg" ]; then
   echo "⚠️ ממיר ההקלטות לא נמצא לאחר ההורדה — תמלול קולי לא יהיה זמין."
 fi
 
-# 🎤 מורידים את מנוע התמלול כבר עכשיו (כ-1 ג'יגה, פעם אחת). אחרת ההקלטה
-# הראשונה של המשתמש הייתה לוקחת דקה ויותר, והוא היה חושב שהעוזר תקוע.
-# כישלון כאן לא עוצר את ההתקנה — הקול פשוט יהיה אטי בפעם הראשונה.
-echo "🎤 מוריד את מנוע התמלול (כ-1 ג'יגה, פעם אחת בלבד)..."
-if (cd "$STAGE/template" && node -e '
-import("./voice.js")
-  .then((v) => v.selfTest())
-  .then((t) => console.log("   ✅ תמלול נבדק: " + t))
-  .catch((e) => { console.log("   ⚠️ " + e.message); process.exit(1); })
-' 2>/dev/null); then
-  :
-else
-  echo "   ⚠️ לא הצלחתי להוריד עכשיו. ההקלטה הראשונה תיקח יותר זמן, ואז זה יסתדר."
-fi
 
 # מכאן והלאה נוגעים בהתקנה הקיימת. אם משהו נכשל — מחזירים את השירות הקודם לעבודה.
 restore_old_service() {

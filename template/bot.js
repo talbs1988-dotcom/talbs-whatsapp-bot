@@ -686,7 +686,12 @@ function extractText(m) {
 }
 
 // ----- 🎤 הודעות קוליות — תמלול מקומי. בלי מפתח, בלי עלות, לא יוצא מהמחשב -----
-import { transcribeBuffer, selfTest as voiceSelfTest, VOICE_MODEL } from "./voice.js";
+import {
+  transcribeBuffer,
+  selfTest as voiceSelfTest,
+  loadEngine,
+  VOICE_MODEL,
+} from "./voice.js";
 
 // התמלול תמיד זמין — אין מפתח להגדיר ואין מה שיכול לפוג
 function voicePublicInfo() {
@@ -2532,6 +2537,13 @@ function openBrowser(url) {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[ui] http://127.0.0.1:${PORT}`);
+
+  // 🎤 מחממים את מנוע התמלול ברקע. ההורדה החד-פעמית (כ-1 ג'יגה) קורית
+  // בזמן שהמשתמש סורק את הברקוד ומגדיר, ולא חוסמת כלום. אם היא נכשלת —
+  // ההקלטה הראשונה פשוט תיקח יותר זמן, והעוזר ממשיך לעבוד כרגיל.
+  loadEngine()
+    .then(() => console.log("[voice] מנוע התמלול מוכן"))
+    .catch((e) => console.log("[voice] המנוע יירד בהקלטה הראשונה:", e.message));
   // פתח דפדפן — רק בהפעלה הראשונה. כל ריסטארט (החלפת ספק, קריסה) לא פותח עוד טאב.
   const url = uiUrl();
   const OPENED_MARK = path.join(__dirname, ".opened");
