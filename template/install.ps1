@@ -18,11 +18,26 @@ Write-Host "==============================================="
 Write-Host ""
 
 # ---------- 0) בדיקות מקדימות — לפני שנוגעים בכלום ----------
+# Node.js — אם חסר, מתקינים לבד. אין סיבה לשלוח מישהו לאתר חיצוני
+# ולבקש ממנו להריץ את הפקודה שוב; זה המקום שבו אנשים נושרים.
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-  Write-Host "❌ Node.js לא מותקן." -ForegroundColor Red
-  Write-Host "   להתקין מ- https://nodejs.org  (גרסת LTS), ואז להריץ את הפקודה שוב."
-  exit 1
+  Write-Host "📦 Node.js לא מותקן — מתקין אותו עכשיו (כמה דקות)..."
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($winget) {
+    & winget install --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+    # winget לא מעדכן את ה-PATH של החלון הפתוח — טוענים אותו מחדש מהמערכת
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
+    $node = Get-Command node -ErrorAction SilentlyContinue
+  }
+  if (-not $node) {
+    Write-Host "❌ לא הצלחתי להתקין Node.js לבד." -ForegroundColor Red
+    Write-Host "   להתקין מ- https://nodejs.org (גרסת LTS), לפתוח PowerShell חדש,"
+    Write-Host "   ולהדביק את אותה פקודה שוב."
+    exit 1
+  }
+  Write-Host "✅ Node.js הותקן"
 }
 $major = [int](& node -p "Number(process.versions.node.split('.')[0])")
 if ($major -lt 18) {
@@ -33,10 +48,18 @@ if ($major -lt 18) {
 
 $claude = Get-Command claude -ErrorAction SilentlyContinue
 if (-not $claude) {
-  Write-Host "❌ Claude Code לא מותקן (או לא בנתיב)." -ForegroundColor Red
-  Write-Host "   להתקין:  npm install -g @anthropic-ai/claude-code"
-  Write-Host "   ואז לפתוח PowerShell חדש ולהריץ את הפקודה שוב."
-  exit 1
+  Write-Host "📦 Claude Code לא מותקן — מתקין אותו עכשיו..."
+  & npm install -g @anthropic-ai/claude-code 2>&1 | Out-Null
+  $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+              [Environment]::GetEnvironmentVariable("Path", "User")
+  $claude = Get-Command claude -ErrorAction SilentlyContinue
+  if (-not $claude) {
+    Write-Host "⚠️ Claude Code לא נמצא לאחר ההתקנה." -ForegroundColor Yellow
+    Write-Host "   העוזר יותקן, אבל כדי שיענה צריך Claude Code מחובר."
+    Write-Host "   לפתוח PowerShell חדש, להריץ:  claude  ולהתחבר."
+  } else {
+    Write-Host "✅ Claude Code הותקן"
+  }
 }
 Write-Host "✅ Node.js $major ו-Claude Code נמצאו"
 

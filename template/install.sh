@@ -24,9 +24,24 @@ if [ "$(uname -s)" != "Darwin" ]; then
   echo ""
   exit 1
 fi
+# Node.js — אם יש brew מתקינים לבד. בלי brew לא מתקינים בכוח: התקנה רשמית
+# דורשת סיסמת מנהל, וסקריפט שרץ בצינור לא יכול לבקש סיסמה כמו שצריך.
+if ! command -v node >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    echo "📦 Node.js לא מותקן — מתקין אותו עכשיו (כמה דקות)..."
+    brew install node >/dev/null 2>&1 || true
+    hash -r 2>/dev/null || true
+  fi
+fi
 if ! command -v node >/dev/null 2>&1; then
   echo "⚠️ Node.js לא מותקן במחשב. מתקינים מ-https://nodejs.org (הגרסה המסומנת LTS), סוגרים ופותחים מחדש את הטרמינל, ומריצים את פקודת ההתקנה שוב."
   exit 1
+fi
+if command -v node >/dev/null 2>&1 && ! command -v claude >/dev/null 2>&1 \
+   && [ ! -x "$HOME/.local/bin/claude" ]; then
+  echo "📦 Claude Code לא מותקן — מתקין אותו עכשיו..."
+  npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+  hash -r 2>/dev/null || true
 fi
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
 if [ "$NODE_MAJOR" -lt 18 ]; then
