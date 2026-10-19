@@ -8,13 +8,15 @@ set -e
 # לבדיקות בלבד אפשר לעקוף (ASSISTANT_DIR/PORT/LABEL) — אצל תלמידים תמיד ברירות המחדל
 BOT_DIR="${ASSISTANT_DIR:-$HOME/talbs-whatsapp-bot}"
 PORT="${ASSISTANT_PORT:-7655}"
+# מאיזה ענף/גרסה להוריד את קוד הבוט. ברירת המחדל main.
+REF="${ASSISTANT_REF:-main}"
 LABEL="${ASSISTANT_LABEL:-com.talbs.workshop-bot}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$BOT_DIR/logs"
 LOG="$LOG_DIR/assistant.log"
 UID_="$(id -u)"
 STAGE_ROOT="$(mktemp -d)"
-STAGE="$STAGE_ROOT/talbs-whatsapp-bot-main"
+STAGE="$STAGE_ROOT/talbs-whatsapp-bot-$(echo "$REF" | tr "/" "-")"
 
 # ---------- 0) בדיקות מקדימות — לפני שנוגעים בכלום ----------
 if [ "$(uname -s)" != "Darwin" ]; then
@@ -54,7 +56,7 @@ fi
 
 # ---------- 1) מורידים ומכינים בצד (העוזר הישן, אם יש, ממשיך לרוץ בינתיים) ----------
 echo "📦 מוריד את הקוד..."
-if ! curl -sfL https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/main.tar.gz | tar -xz -C "$STAGE_ROOT"; then
+if ! curl -sfL "https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/$REF.tar.gz" | tar -xz -C "$STAGE_ROOT"; then
   echo "⚠️ ההורדה נכשלה — בודקים חיבור לאינטרנט ומריצים שוב. שום דבר לא שונה."
   exit 1
 fi

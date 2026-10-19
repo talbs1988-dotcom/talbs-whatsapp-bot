@@ -9,7 +9,9 @@ $Port     = if ($env:ASSISTANT_PORT)  { $env:ASSISTANT_PORT }  else { "7655" }
 $TaskName = if ($env:ASSISTANT_LABEL) { $env:ASSISTANT_LABEL } else { "TalbsWorkshopBot" }
 $LogDir   = Join-Path $BotDir "logs"
 $Log      = Join-Path $LogDir "assistant.log"
-$Zip      = "https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/refs/heads/main.zip"
+# מאיזה ענף/גרסה להוריד את קוד הבוט. ברירת המחדל main.
+$Ref      = if ($env:ASSISTANT_REF) { $env:ASSISTANT_REF } else { "main" }
+$Zip      = "https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/$Ref.zip"
 
 Write-Host ""
 Write-Host "==============================================="
@@ -78,7 +80,7 @@ try {
   Remove-Item -Recurse -Force $StageRoot -ErrorAction SilentlyContinue
   exit 1
 }
-$Stage = Join-Path $StageRoot "talbs-whatsapp-bot-main\template"
+$Stage = Join-Path $StageRoot "talbs-whatsapp-bot-$($Ref -replace "/","-")\template"
 if (-not (Test-Path (Join-Path $Stage "bot.js"))) {
   Write-Host "❌ הקוד שירד לא תקין." -ForegroundColor Red
   Remove-Item -Recurse -Force $StageRoot -ErrorAction SilentlyContinue
