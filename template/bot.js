@@ -2615,6 +2615,73 @@ server.listen(PORT, "127.0.0.1", () => {
   openBrowser(url);
 });
 
+
+// ----- 📬 תיבת דואר יוצא + דוח מצב (בשביל סוכן מנכ״ל) -----
+// כלי מקומי (כמו סוכן מנכ״ל) שם קובץ טקסט בתיקיית outbox, והעוזר שולח אותו לבעל/ת העסק בלבד.
+// sendBotMessage כבר חוסם כל יעד שהוא לא בעל המכשיר, אז אין דרך לשלוח מכאן למישהו אחר.
+// בנוסף העוזר כותב status.json, כדי שסוכן מנכ״ל ידע אם הוא באמת מחובר לוואטסאפ ולא רק דלוק.
+const OUTBOX_DIR = path.join(__dirname, "outbox");
+const STATUS_FILE = path.join(__dirname, "status.json");
+let outboxBusy = false;
+function writeStatusFile() {
+  try {
+    fs.writeFileSync(
+      STATUS_FILE,
+      JSON.stringify({
+        status: state.status,
+        connected: state.status === "connected",
+        updatedAt: new Date().toISOString(),
+        lastError: state.lastError ? String(state.lastError).slice(0, 200) : null,
+      }),
+    );
+  } catch {}
+}
+async function drainOutbox() {
+  if (outboxBusy || state.status !== "connected") return;
+  outboxBusy = true;
+  try {
+    let files = [];
+    try {
+      files = fs.readdirSync(OUTBOX_DIR).filter((f) => f.endsWith(".txt")).sort();
+    } catch {
+      return;
+    }
+    for (const f of files.slice(0, 5)) {
+      const p = path.join(OUTBOX_DIR, f);
+      let text = "";
+      try {
+        text = fs.readFileSync(p, "utf8").trim();
+      } catch {
+        continue;
+      }
+      const sentDir = path.join(OUTBOX_DIR, "sent");
+      if (!text) {
+        try { fs.unlinkSync(p); } catch {}
+        continue;
+      }
+      const target = ownerTargetJid();
+      if (!target) break;
+      const sent = await sendBotMessage(target, text.slice(0, 3500));
+      if (!sent) break; // נשאר בתיבה וננסה שוב בעוד חצי דקה
+      try {
+        fs.mkdirSync(sentDir, { recursive: true });
+        fs.renameSync(p, path.join(sentDir, f));
+      } catch {
+        try { fs.unlinkSync(p); } catch {}
+      }
+      console.log(`[outbox] נשלח: ${f}`);
+    }
+  } finally {
+    outboxBusy = false;
+  }
+}
+try { fs.mkdirSync(OUTBOX_DIR, { recursive: true }); } catch {}
+setInterval(() => {
+  writeStatusFile();
+  drainOutbox().catch((e) => console.error("[outbox]", e.message));
+}, 30000);
+setTimeout(writeStatusFile, 5000);
+
 // ----- Boot -----
 startBot().catch((e) => {
   console.error("[boot]", e);
