@@ -98,6 +98,7 @@ for f in config.json .env .ui-key sessions.json green-seen.json groups-seen.json
 done
 [ -d "$BOT_DIR/auth" ] && cp -R "$BOT_DIR/auth" "$KEEP/" || true
 [ -d "$BOT_DIR/logs" ] && cp -R "$BOT_DIR/logs" "$KEEP/" || true
+[ -d "$BOT_DIR/outbox" ] && cp -R "$BOT_DIR/outbox" "$KEEP/" || true
 rm -rf "$BOT_DIR"
 mv "$STAGE/template" "$BOT_DIR"
 for f in config.json .env .ui-key sessions.json green-seen.json groups-seen.json feed.json .opened; do
@@ -105,6 +106,7 @@ for f in config.json .env .ui-key sessions.json green-seen.json groups-seen.json
 done
 [ -d "$KEEP/auth" ] && cp -R "$KEEP/auth" "$BOT_DIR/auth" || true
 [ -d "$KEEP/logs" ] && cp -R "$KEEP/logs" "$BOT_DIR/logs" || true
+[ -d "$KEEP/outbox" ] && cp -R "$KEEP/outbox" "$BOT_DIR/outbox" || true
 rm -rf "$KEEP" "$STAGE_ROOT"
 cd "$BOT_DIR"
 chmod +x run.sh start.command 2>/dev/null || true

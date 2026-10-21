@@ -2656,7 +2656,10 @@ async function drainOutbox() {
       }
       const sentDir = path.join(OUTBOX_DIR, "sent");
       if (!text) {
-        try { fs.unlinkSync(p); } catch {}
+        // קובץ ריק וחדש: אולי עוד נכתב. מוחקים רק קובץ ריק שעבר עליו יותר מדקה.
+        let age = 0;
+        try { age = Date.now() - fs.statSync(p).mtimeMs; } catch {}
+        if (age > 60000) { try { fs.unlinkSync(p); } catch {} }
         continue;
       }
       const target = ownerTargetJid();

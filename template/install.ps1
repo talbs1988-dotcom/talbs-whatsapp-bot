@@ -85,7 +85,7 @@ foreach ($f in $UserFiles) {
   $src = Join-Path $BotDir $f
   if (Test-Path $src) { Copy-Item $src (Join-Path $Keep $f) -Force }
 }
-foreach ($d in @("auth","logs")) {
+foreach ($d in @("auth","logs","outbox")) {
   $src = Join-Path $BotDir $d
   if (Test-Path $src) { Copy-Item $src (Join-Path $Keep $d) -Recurse -Force }
 }
@@ -97,7 +97,7 @@ foreach ($f in $UserFiles) {
   $src = Join-Path $Keep $f
   if (Test-Path $src) { Copy-Item $src (Join-Path $BotDir $f) -Force }
 }
-foreach ($d in @("auth","logs")) {
+foreach ($d in @("auth","logs","outbox")) {
   $src = Join-Path $Keep $d
   if (Test-Path $src) { Copy-Item $src (Join-Path $BotDir $d) -Recurse -Force }
 }
