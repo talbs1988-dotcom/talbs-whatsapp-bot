@@ -958,7 +958,7 @@
         </details>
 
         <details class="settings">
-          <summary>🎤 הודעות קוליות (אופציונלי)</summary>
+          <summary>🎤 הודעות קוליות</summary>
           <div class="body">
             <p
               style="
@@ -968,18 +968,20 @@
                 line-height: 1.6;
               "
             >
-              רוצים לדבר עם העוזר במקום לכתוב? הוא מתמלל הקלטות דרך OpenAI
-              (Whisper) ועונה כרגיל. זה דורש מפתח OpenAI משלכם — העלות כ-2
-              אגורות לדקת הקלטה. המפתח נשמר רק במחשב הזה, בקובץ
-              <code>.env</code> — לא במסך ולא בקוד.
+              אפשר לדבר איתי במקום לכתוב — שולחים הקלטה בוואטסאפ ואני מתמלל
+              ועונה כרגיל. <strong>זה כבר מופעל, אין מה להגדיר.</strong>
             </p>
-            <label>מפתח OpenAI (מתחיל ב-sk-)</label>
-            <input
-              id="openaiKey"
-              type="password"
-              autocomplete="off"
-              placeholder="מדביקים כאן את המפתח"
-            />
+            <p
+              style="
+                font-size: 13px;
+                color: var(--smoke);
+                margin: 0 0 10px;
+                line-height: 1.6;
+              "
+            >
+              התמלול רץ על המחשב הזה: אין מפתח, אין עלות לדקה, וההקלטות
+              לא יוצאות מהמחשב לשום שירות חיצוני.
+            </p>
             <small
               style="
                 color: var(--smoke);
@@ -989,9 +991,8 @@
                 line-height: 1.6;
               "
             >
-              איך משיגים: platform.openai.com ← API keys ← Create new secret
-              key. טוענים שם כמה דולרים של קרדיט (Billing). אחרי ההדבקה —
-              "שמירת הגדרות".
+              ההקלטה הראשונה אחרי הפעלה לוקחת כ-20 שניות (טעינת המנוע),
+              והבאות כ-4 שניות.
             </small>
             <div
               style="
@@ -1003,15 +1004,7 @@
               "
             >
               <button class="btn btn-ghost" id="voice-check-btn" type="button">
-                🧪 בדיקת מפתח
-              </button>
-              <button
-                class="btn btn-ghost"
-                id="voice-clear-btn"
-                type="button"
-                style="display: none"
-              >
-                🗑 הסרת המפתח
+                🧪 בדיקת תמלול
               </button>
               <span
                 class="check-result"
@@ -1764,11 +1757,6 @@
               next.greenApi = { instanceId, token: String(gt || "").trim() };
             }
           }
-          // 🎤 מפתח OpenAI: ריק = לא לגעת בקיים. נשמר ב-.env בלבד.
-          {
-            const k = (document.getElementById("openaiKey").value || "").trim();
-            if (k) next.openai = { key: k };
-          }
           // 👥 קבוצות שנבחרו
           next.groups = Array.from(selectedGroups, ([id, name]) => ({
             id,
@@ -1817,7 +1805,6 @@
             // אבטחה: הטוקן נשמר ב-.env — לא משאירים אותו גלוי בשדה על המסך
             const tokField = document.getElementById("greenToken");
             if (tokField) tokField.value = "";
-            document.getElementById("openaiKey").value = "";
             updateGroupsCount(true);
             fetchState().then((st) => st && renderVoice(st.config.voice));
             if (next.agentName) {
@@ -2094,20 +2081,15 @@
           await fetch("/pair/clear", { method: "POST" });
         });
 
-      // ----- 🎤 הודעות קוליות -----
+      // ----- 🎤 הודעות קוליות — מנוע מקומי, אין מה להגדיר -----
       function renderVoice(v) {
         const st = document.getElementById("voice-status");
-        const clr = document.getElementById("voice-clear-btn");
-        const inp = document.getElementById("openaiKey");
-        if (v && v.hasKey) {
-          inp.placeholder = "•••••••• שמור — מדביקים חדש רק כדי להחליף";
-          clr.style.display = "inline-flex";
+        if (!st) return;
+        if (v && v.ready) {
           st.style.display = "inline-block";
           st.className = "check-result ok";
-          st.textContent = "✓ מפתח שמור — הודעות קוליות פעילות";
+          st.textContent = "✓ תמלול פעיל";
         } else {
-          inp.placeholder = "מדביקים כאן את המפתח";
-          clr.style.display = "none";
           st.style.display = "none";
         }
       }
@@ -2117,39 +2099,19 @@
           const st = document.getElementById("voice-status");
           st.style.display = "inline-block";
           st.className = "check-result";
-          st.textContent = "בודק מול OpenAI...";
+          st.textContent = "מתמלל הקלטה לבדיקה... (בפעם הראשונה עד דקה)";
           try {
             const j = await (
-              await fetch("/voice/check", {
-                method: "POST",
-                body: JSON.stringify({
-                  key: document.getElementById("openaiKey").value.trim(),
-                }),
-              })
+              await fetch("/voice/check", { method: "POST" })
             ).json();
             st.className = j.ok ? "check-result ok" : "check-result fail";
-            const typed = !!document.getElementById("openaiKey").value.trim();
             st.textContent = j.ok
-              ? typed
-                ? '✅ המפתח תקין — לוחצים "שמירת הגדרות"'
-                : "✅ המפתח השמור תקין — הודעות קוליות פעילות"
+              ? `✅ עובד (${j.seconds} שנ'): "${j.text}"`
               : "❌ " + (j.error || "שגיאה");
           } catch (e) {
             st.className = "check-result fail";
             st.textContent = "❌ " + e.message;
           }
-        });
-      document
-        .getElementById("voice-clear-btn")
-        .addEventListener("click", async () => {
-          if (!confirm("להסיר את מפתח OpenAI? הודעות קוליות יפסיקו להיות מתומללות."))
-            return;
-          const r = await fetch("/config", {
-            method: "POST",
-            body: JSON.stringify({ openai: { clear: true } }),
-          });
-          if (r.ok) renderVoice({ hasKey: false });
-          else alert("לא הצלחתי להסיר — נסו לרענן את הדף.");
         });
 
       // ----- 👥 קבוצות -----

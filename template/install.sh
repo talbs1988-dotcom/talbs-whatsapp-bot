@@ -8,13 +8,15 @@ set -e
 # לבדיקות בלבד אפשר לעקוף (ASSISTANT_DIR/PORT/LABEL) — אצל תלמידים תמיד ברירות המחדל
 BOT_DIR="${ASSISTANT_DIR:-$HOME/talbs-whatsapp-bot}"
 PORT="${ASSISTANT_PORT:-7655}"
+# מאיזה ענף/גרסה להוריד את קוד הבוט. ברירת המחדל main.
+REF="${ASSISTANT_REF:-main}"
 LABEL="${ASSISTANT_LABEL:-com.talbs.workshop-bot}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$BOT_DIR/logs"
 LOG="$LOG_DIR/assistant.log"
 UID_="$(id -u)"
 STAGE_ROOT="$(mktemp -d)"
-STAGE="$STAGE_ROOT/talbs-whatsapp-bot-main"
+STAGE="$STAGE_ROOT/talbs-whatsapp-bot-$(echo "$REF" | tr "/" "-")"
 
 # ---------- 0) בדיקות מקדימות — לפני שנוגעים בכלום ----------
 if [ "$(uname -s)" != "Darwin" ]; then
@@ -23,6 +25,15 @@ if [ "$(uname -s)" != "Darwin" ]; then
   echo "   irm https://raw.githubusercontent.com/talbs1988-dotcom/talbs-whatsapp-bot/main/template/install.ps1 | iex"
   echo ""
   exit 1
+fi
+# Node.js — אם יש brew מתקינים לבד. בלי brew לא מתקינים בכוח: התקנה רשמית
+# דורשת סיסמת מנהל, וסקריפט שרץ בצינור לא יכול לבקש סיסמה כמו שצריך.
+if ! command -v node >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    echo "📦 Node.js לא מותקן — מתקין אותו עכשיו (כמה דקות)..."
+    brew install node >/dev/null 2>&1 || true
+    hash -r 2>/dev/null || true
+  fi
 fi
 if ! command -v node >/dev/null 2>&1; then
   echo "⚠️ Node.js לא מותקן במחשב. מתקינים מ-https://nodejs.org (הגרסה המסומנת LTS), סוגרים ופותחים מחדש את הטרמינל, ומריצים את פקודת ההתקנה שוב."
@@ -45,7 +56,7 @@ fi
 
 # ---------- 1) מורידים ומכינים בצד (העוזר הישן, אם יש, ממשיך לרוץ בינתיים) ----------
 echo "📦 מוריד את הקוד..."
-if ! curl -sfL https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/main.tar.gz | tar -xz -C "$STAGE_ROOT"; then
+if ! curl -sfL "https://github.com/talbs1988-dotcom/talbs-whatsapp-bot/archive/$REF.tar.gz" | tar -xz -C "$STAGE_ROOT"; then
   echo "⚠️ ההורדה נכשלה — בודקים חיבור לאינטרנט ומריצים שוב. שום דבר לא שונה."
   exit 1
 fi
@@ -60,6 +71,17 @@ if ! (cd "$STAGE/template" && npm install --ignore-scripts --no-fund --no-audit 
   echo "⚠️ התקנת התלויות נכשלה — בודקים חיבור לאינטרנט ומריצים שוב. שום דבר לא שונה."
   exit 1
 fi
+
+# 🎤 ffmpeg (להמרת הקלטות קוליות) מגיע דרך סקריפט התקנה, ו---ignore-scripts
+# חוסם אותו. מורידים אותו במפורש — פקודה אחת ומוכרת, לא הרצה של מה שיזדמן.
+echo "🎤 מוריד את ממיר ההקלטות..."
+if ! (cd "$STAGE/template" && node node_modules/ffmpeg-static/install.js); then
+  echo "⚠️ הורדת ממיר ההקלטות נכשלה — התמלול הקולי לא יעבוד. שאר העוזר כן."
+fi
+if [ ! -s "$STAGE/template/node_modules/ffmpeg-static/ffmpeg" ]; then
+  echo "⚠️ ממיר ההקלטות לא נמצא לאחר ההורדה — תמלול קולי לא יהיה זמין."
+fi
+
 
 # מכאן והלאה נוגעים בהתקנה הקיימת. אם משהו נכשל — מחזירים את השירות הקודם לעבודה.
 restore_old_service() {
