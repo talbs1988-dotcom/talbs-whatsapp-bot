@@ -65,6 +65,11 @@ const ENV_ALLOWED = new Set([
   "OPENAI_API_KEY",
 ]);
 function loadDotEnv() {
+  // החיבור ל-Green API מגיע רק מהקובץ של העוזר. משתנים מבחוץ (למשל מההגדרות של Claude Code)
+  // היו מחברים עוזר חדש בטעות לחיבור של עוזר אחר באותו מחשב.
+  delete process.env.GREEN_API_INSTANCE_ID;
+  delete process.env.GREEN_API_TOKEN;
+  delete process.env.GREEN_API_BASE_URL;
   try {
     const text = fs.readFileSync(ENV_PATH, "utf8");
     for (const line of text.split("\n")) {
