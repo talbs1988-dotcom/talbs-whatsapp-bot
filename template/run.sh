@@ -33,4 +33,8 @@ if [ "$SIZE" -gt 5000000 ]; then
   tail -n 2000 "$LOG" >"$LOG.tmp" && cat "$LOG.tmp" >"$LOG" && rm -f "$LOG.tmp"
 fi
 
+# המחשב לא נרדם כל עוד העוזר רץ (בלי זה העוזר מפסיק לענות כשהמק נכנס למנוחה)
+if [ -x /usr/bin/caffeinate ]; then
+  exec /usr/bin/caffeinate -ims "$NODE" bot.js
+fi
 exec "$NODE" bot.js
