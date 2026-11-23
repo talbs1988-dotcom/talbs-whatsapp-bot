@@ -254,7 +254,22 @@ const SAFETY_SETTINGS = {
     ],
   },
 };
-const SAFETY_FILE = path.join(__dirname, "safety-settings.json");
+// ב-Windows הפקודה ל-Claude עוברת דרך shell בלי מרכאות, ונתיב עם רווח (C:\Users\Dana Cohen) היה נשבר.
+// לכן כשבתיקיית העוזר יש רווח, שומרים את קובץ הבטיחות ב-ProgramData (C:\ProgramData — בלי רווחים).
+function safetyFilePath() {
+  const local = path.join(__dirname, "safety-settings.json");
+  if (process.platform !== "win32" || !/\s/.test(local)) return local;
+  const base = process.env.PROGRAMDATA || process.env.ALLUSERSPROFILE || "C:\\ProgramData";
+  if (/\s/.test(base)) return local;
+  const dir = path.join(base, "talbs-assistant");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    return local;
+  }
+  return path.join(dir, "safety-settings.json");
+}
+const SAFETY_FILE = safetyFilePath();
 try {
   fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFETY_SETTINGS, null, 2));
 } catch (e) {
@@ -487,8 +502,7 @@ function askClaude(userJid, text, opts = {}) {
       "--output-format",
       "json",
     ];
-    // ב-Windows הפקודה עוברת דרך shell בלי מרכאות: נתיב עם רווח (C:\Users\Some Name) היה שובר אותה.
-    // לכן ב-Windows מוסיפים רק כשבנתיב אין רווחים (רוב המחשבים).
+    // נתיב עם רווח היה שובר את הפקודה ב-Windows; safetyFilePath() כבר דואג לנתיב בלי רווחים
     if (
       (process.platform !== "win32" || !/\s/.test(SAFETY_FILE)) &&
       fs.existsSync(SAFETY_FILE)
