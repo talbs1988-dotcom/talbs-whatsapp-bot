@@ -19,6 +19,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import qrcode from "qrcode";
@@ -259,26 +261,129 @@ const SAFETY_SETTINGS = {
     ],
   },
 };
-// ב-Windows הפקודה ל-Claude עוברת דרך shell בלי מרכאות, ונתיב עם רווח (C:\Users\Dana Cohen) היה נשבר.
-// לכן כשבתיקיית העוזר יש רווח, שומרים את קובץ הבטיחות ב-ProgramData (C:\ProgramData — בלי רווחים).
+// קובץ הבטיחות בתיקיית העוזר (בתוך הפרופיל של המשתמש). פעם הוא עבר ל-C:\\ProgramData כשהיה רווח
+// בנתיב, כי cmd שבר נתיבים עם רווח. היום מריצים בלי shell (או עם מרכאות), ו-ProgramData קריא לכל משתמש במחשב.
 function safetyFilePath() {
-  const local = path.join(__dirname, "safety-settings.json");
-  if (process.platform !== "win32" || !/\s/.test(local)) return local;
-  const base = process.env.PROGRAMDATA || process.env.ALLUSERSPROFILE || "C:\\ProgramData";
-  if (/\s/.test(base)) return local;
-  const dir = path.join(base, "talbs-assistant");
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch (e) {
-    return local;
-  }
-  return path.join(dir, "safety-settings.json");
+  return path.join(__dirname, "safety-settings.json");
 }
 const SAFETY_FILE = safetyFilePath();
+let SAFETY_OK = false;
 try {
   fs.writeFileSync(SAFETY_FILE, JSON.stringify(SAFETY_SETTINGS, null, 2));
+  SAFETY_OK = true;
 } catch (e) {
   console.log("[safety] לא הצלחתי לכתוב את קובץ הבטיחות:", e.message);
+}
+
+// ----- 🪟 הרצת Claude בבטחה (במיוחד בווינדוס) -----
+// עד 24.11.2026 בווינדוס הפקודה עברה דרך cmd.exe (shell) בלי מרכאות. שתי בעיות:
+// (1) ירידת השורה הראשונה בהנחיות חתכה את כל השאר, וההודעה של המשתמש לא הגיעה לקלוד
+//     בכלל (קלוד קיבל את המילה "ברזל" מ"כלל ברזל" במקום ההודעה).
+// (2) טקסט מהוואטסאפ עם & או | היה יכול לרוץ כפקודה במחשב.
+// עכשיו: ההנחיות בקובץ זמני (600), ההודעה דרך stdin, ובווינדוס מריצים את claude.exe ישירות בלי shell.
+// בכל מערכת: ההודעה וההנחיות לא בשורת הפקודה (שם כל משתמש במחשב יכול לראות אותן). TALBS_VIA_FILES=0 מחזיר לישן.
+const VIA_FILES = process.env.TALBS_VIA_FILES !== "0";
+const PROMPT_DIR = __dirname;
+try {
+  for (const f of fs.readdirSync(PROMPT_DIR)) {
+    if (/^sp-[a-f0-9]+\.txt$/.test(f)) fs.unlinkSync(path.join(PROMPT_DIR, f));
+  }
+} catch {}
+function writePromptFile(text) {
+  try {
+    const p = path.join(PROMPT_DIR, `sp-${randomBytes(8).toString("hex")}.txt`);
+    writePrivate(p, text);
+    return p;
+  } catch (e) {
+    console.log("[claude] לא הצלחתי לכתוב קובץ הנחיות:", e.message);
+    return null;
+  }
+}
+function isFile(p) {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+// מוצא את claude.exe האמיתי: התקנה רגילה (‎.local\bin), PATH, או התקנת npm (claude.cmd → החבילה)
+function findClaudeWin(env = process.env) {
+  const dirs = String(env.PATH || env.Path || "")
+    .split(";")
+    .map((d) => d.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  const home = env.USERPROFILE || env.HOME || "";
+  const exes = [];
+  if (env.CLAUDE_BIN) exes.push(env.CLAUDE_BIN);
+  if (home) exes.push(path.join(home, ".local", "bin", "claude.exe"));
+  for (const d of dirs) exes.push(path.join(d, "claude.exe"));
+  for (const x of exes) if (/\.exe$/i.test(x) && isFile(x)) return { cmd: x, pre: [] };
+  const shimDirs = [];
+  if (env.CLAUDE_BIN && /\.cmd$/i.test(env.CLAUDE_BIN)) shimDirs.push(path.dirname(env.CLAUDE_BIN));
+  if (env.APPDATA) shimDirs.push(path.join(env.APPDATA, "npm"));
+  for (const d of dirs) if (isFile(path.join(d, "claude.cmd"))) shimDirs.push(d);
+  for (const d of shimDirs) {
+    const pkgDir = path.join(d, "node_modules", "@anthropic-ai", "claude-code");
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+      const rel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin && pkg.bin.claude;
+      if (!rel) continue;
+      const target = path.join(pkgDir, rel);
+      if (!isFile(target)) continue;
+      if (/\.exe$/i.test(target)) return { cmd: target, pre: [] };
+      if (/\.(c|m)?js$/i.test(target)) return { cmd: process.execPath, pre: [target] };
+    } catch {}
+  }
+  return null;
+}
+let CLAUDE_LAUNCH = null;
+function claudeLaunch() {
+  if (process.platform !== "win32") {
+    return { cmd: resolveClaudeBin(), pre: [], shell: false };
+  }
+  if (!CLAUDE_LAUNCH) {
+    const f = findClaudeWin();
+    if (f) {
+      CLAUDE_LAUNCH = { ...f, shell: false };
+      console.log("[claude] מריץ ישירות:", f.cmd);
+    }
+  }
+  // גיבוי אחרון: דרך cmd. בטוח כי ההודעה וההנחיות לא בשורת הפקודה, ונתיבים במרכאות.
+  return CLAUDE_LAUNCH || { cmd: "claude", pre: [], shell: true };
+}
+function spawnClaude(args, { cwd, input = null }) {
+  const L = claudeLaunch();
+  const finalArgs = L.shell
+    ? args.map((a) =>
+        /[\s"&|<>^%!()]/.test(String(a)) ? `"${String(a).replace(/"/g, "")}"` : String(a),
+      )
+    : args;
+  let child;
+  try {
+    child = spawn(L.cmd, [...L.pre, ...finalArgs], {
+      cwd,
+      env: childEnv(),
+      shell: L.shell,
+      windowsHide: true,
+      // בלי stdin פתוח Claude מחכה לקלט שלא מגיע; כשיש הודעה היא נשלחת דרכו
+      stdio: [input == null ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+  } catch (e) {
+    // spawn שנכשל מיד: מחזירים "תהליך" שמדווח שגיאה, כדי שהטיפול הרגיל (גיבוי/הודעת שגיאה) ירוץ
+    const fake = new EventEmitter();
+    fake.stdout = new PassThrough();
+    fake.stderr = new PassThrough();
+    fake.kill = () => {};
+    fake._launch = L;
+    process.nextTick(() => fake.emit("error", e));
+    return fake;
+  }
+  if (input != null) {
+    child.stdin.on("error", () => {});
+    child.stdin.end(String(input));
+  }
+  child._launch = L;
+  return child;
 }
 
 const DEFAULT_WELCOME_MESSAGE = `היי 💛 אני {agentName}, העוזר האישי שלך.
@@ -507,11 +612,7 @@ function askClaude(userJid, text, opts = {}) {
       "--output-format",
       "json",
     ];
-    // נתיב עם רווח היה שובר את הפקודה ב-Windows; safetyFilePath() כבר דואג לנתיב בלי רווחים
-    if (
-      (process.platform !== "win32" || !/\s/.test(SAFETY_FILE)) &&
-      fs.existsSync(SAFETY_FILE)
-    ) {
+    if (SAFETY_OK && fs.existsSync(SAFETY_FILE)) {
       args.push("--settings", SAFETY_FILE);
     }
     if (sessionId) {
@@ -565,32 +666,48 @@ function askClaude(userJid, text, opts = {}) {
     } else if (config.gender === "female") {
       systemPrompt += "\n\nחשוב: התייחסי למשתמשת בלשון נקבה תמיד.";
     }
-    if (systemPrompt) {
-      args.push("--append-system-prompt", systemPrompt);
+    // ההנחיות בקובץ וההודעה ב-stdin, לא בשורת הפקודה (ראו spawnClaude למעלה)
+    let promptFile = null;
+    if (VIA_FILES) {
+      if (systemPrompt) {
+        promptFile = writePromptFile(systemPrompt);
+        if (promptFile) args.push("--append-system-prompt-file", promptFile);
+      }
+    } else {
+      if (systemPrompt) {
+        args.push("--append-system-prompt", systemPrompt);
+      }
+      // הטקסט תמיד אחרון ואחרי "--": הודעה שמתחילה במקף ("- לקנות חלב", "-1") הייתה
+      // מתפרשת כאופציה של Claude ("unknown option") — ואין תשובה.
+      args.push("--", text);
     }
-    // הטקסט תמיד אחרון ואחרי "--": הודעה שמתחילה במקף ("- לקנות חלב", "-1") הייתה
-    // מתפרשת כאופציה של Claude ("unknown option") — ואין תשובה.
-    args.push("--", text);
+    const cleanup = () => {
+      if (promptFile) {
+        try {
+          fs.unlinkSync(promptFile);
+        } catch {}
+        promptFile = null;
+      }
+    };
 
-    const claudeBin = resolveClaudeBin();
     const workdir = config.workdir || process.env.HOME;
 
     // תיקיית עבודה שנמחקה/שונה שמה → spawn נכשל ומפיל את כל העוזר. נופלים לבית.
     const cwd = fs.existsSync(workdir) ? workdir : process.env.HOME;
     if (cwd !== workdir)
       console.log(`[claude] תיקיית העבודה לא קיימת (${workdir}) — משתמש בבית`);
-    const child = spawn(claudeBin, args, {
-      cwd,
-      env: childEnv(),
-      // Windows: claude מותקן כ-claude.cmd, ו-spawn לא מריץ .cmd בלי shell
-      shell: process.platform === "win32",
-      // בלי זה Claude מחכה ל-stdin שלא מגיע, ונופל אחרי 3 שניות
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnClaude(args, { cwd, input: VIA_FILES ? text : null });
     // בלי זה: claude שלא נמצא (ENOENT) = unhandled error = העוזר כולו קורס על כל הודעה
     child.on("error", (e) => {
       clearTimeout(killer);
+      cleanup();
       console.error("[claude] spawn failed:", e.message);
+      // ווינדוס: הקובץ שמצאנו לא רץ — חוזרים פעם אחת דרך cmd (עדיין בטוח, ההודעה ב-stdin)
+      if (process.platform === "win32" && !child._launch.shell && !opts.launchRetry) {
+        CLAUDE_LAUNCH = { cmd: "claude", pre: [], shell: true };
+        resolve(askClaude(userJid, text, { ...opts, launchRetry: true }));
+        return;
+      }
       resolve({
         ok: false,
         text:
@@ -615,6 +732,7 @@ function askClaude(userJid, text, opts = {}) {
 
     child.on("close", (code) => {
       clearTimeout(killer);
+      cleanup();
       if (timedOut) {
         // ה-session נשמר (נוצר ב-Claude Code גם אם נעצר) — "תמשיך" באמת ממשיך
         console.error(`[claude] נעצר אחרי ${CLAUDE_TIMEOUT_MS / 60000} דקות`);
@@ -637,7 +755,7 @@ function askClaude(userJid, text, opts = {}) {
           console.log("[claude] session לא תקף בתיקייה הזו — מתחיל שיחה חדשה");
           delete sessions[userJid];
           saveSessions();
-          resolve(askClaude(userJid, text, { noResumeRetry: true }));
+          resolve(askClaude(userJid, text, { ...opts, noResumeRetry: true }));
           return;
         }
         // שגיאה אמיתית — להראות מה קרה, לא משפט גנרי שמפנה למקום הלא נכון
@@ -2093,7 +2211,6 @@ const server = http.createServer(async (req, res) => {
   // POST /check-claude — שני שלבים: (1) claude מותקן? (2) עונה באמת? (מותקן ≠ מחובר לחשבון)
   // POST (ולא GET) כי זה מריץ תהליך — וכך שער ה-nonce מגן עליו; ובדיקה אחת בכל רגע.
   if (req.method === "POST" && url.pathname === "/check-claude") {
-    const claudeBin = resolveClaudeBin();
     const send = (obj) => {
       if (res.headersSent) return;
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -2103,15 +2220,13 @@ const server = http.createServer(async (req, res) => {
       claudeCheckInflight.then(send);
       return;
     }
-    const run = (args, timeoutMs) =>
+    const run = (args, timeoutMs, input = null) =>
       new Promise((resolve) => {
         let out = "";
         let err = "";
-        const child = spawn(claudeBin, args, {
+        const child = spawnClaude(args, {
           cwd: process.env.HOME || process.env.USERPROFILE,
-          env: childEnv(),
-          shell: process.platform === "win32",
-          stdio: ["ignore", "pipe", "pipe"],
+          input,
         });
         const t = setTimeout(() => {
           try {
@@ -2143,17 +2258,13 @@ const server = http.createServer(async (req, res) => {
         };
       }
       const version = v.out.trim() || null;
+      const ask = "ענה במילה אחת בלבד: מוכן";
       const p = await run(
-        [
-          "-p",
-          "--model",
-          "haiku",
-          "--output-format",
-          "json",
-          "--",
-          "ענה במילה אחת בלבד: מוכן",
-        ],
+        ["-p", "--model", "haiku", "--output-format", "json"].concat(
+          VIA_FILES ? [] : ["--", ask],
+        ),
         90000,
+        VIA_FILES ? ask : null,
       );
       if (p.code !== 0) {
         const why = (p.err.trim().split("\n").pop() || "").slice(0, 160);
