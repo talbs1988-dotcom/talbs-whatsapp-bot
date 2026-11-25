@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="app-build" content="2026.11.24-2" />
+    <meta name="app-build" content="2026.11.25-1" />
     <title>העוזר האישי שלי · טל בשור</title>
     <!-- הגופן מוטמע: המסך לא פונה לשום שרת חיצוני (גם לא ל-Google Fonts) -->
     <style>
@@ -810,12 +810,12 @@
                 border-radius: 10px;
               "
             >
-              <label>Instance ID (10 ספרות, מהקונסול של Green API)</label>
+              <label>Instance ID (המספר מהקונסול של Green API, מעתיקים אותו כמו שהוא)</label>
               <input
                 id="greenInstanceId"
                 inputmode="numeric"
                 autocomplete="off"
-                placeholder="למשל 7105123456"
+                placeholder="למשל 710512345678"
               />
               <label style="margin-top: 10px">API Token</label>
               <input
@@ -1555,15 +1555,18 @@
       document
         .getElementById("green-connect-btn")
         .addEventListener("click", async () => {
+          // Green API: מזהים ישנים 10 ספרות, חדשים (מ-7.7.2026) 12 ספרות. מקבלים כל אורך סביר,
+          // ומנקים רווחים/מקפים שנכנסים בהעתקה.
           const instanceId = document
             .getElementById("greenInstanceId")
-            .value.trim();
+            .value.replace(/\D/g, "");
           const token = document.getElementById("greenToken").value.trim();
           const res = document.getElementById("green-check-result");
           res.style.display = "inline-block";
-          if (!/^\d{10}$/.test(instanceId)) {
+          if (!/^\d{8,16}$/.test(instanceId)) {
             res.className = "check-result fail";
-            res.textContent = "Instance ID צריך להיות 10 ספרות";
+            res.textContent =
+              "לא מצאתי מספר Instance ID. מעתיקים אותו מהקונסול של Green API, את כל הספרות";
             return;
           }
           res.className = "check-result";
